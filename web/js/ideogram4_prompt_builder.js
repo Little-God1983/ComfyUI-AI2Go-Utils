@@ -348,7 +348,7 @@ function injectStyle() {
   s.id = "ai2go-ideo-style";
   s.textContent = `
     .ai2go-ideo-wrap { display:flex; flex-direction:column; overflow:hidden; position:relative; pointer-events:auto; gap:4px; }
-    .ai2go-ideo-cv { flex:1 1 auto; min-height:60px; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+    .ai2go-ideo-cv { flex:1 1 auto; min-width:0; min-height:60px; display:flex; align-items:center; justify-content:center; overflow:hidden; }
     .ai2go-ideo-canvas { cursor:crosshair; display:block; flex:0 0 auto; background:#1a1a1a; border-radius:4px; outline:none; touch-action:none; }
     .ai2go-ideo-bar { display:flex; align-items:center; gap:6px; font:11px sans-serif; color:#aaa; user-select:none; padding:0 2px; flex:0 0 auto; }
     .ai2go-ideo-panel { display:flex; flex-direction:column; gap:5px; padding:6px; background:#262626; border-radius:4px; font:11px sans-serif; color:#bbb; flex:0 0 auto; overflow-y:auto; min-height:0; }
@@ -808,12 +808,12 @@ app.registerExtension({
         explorerEl.classList.toggle("collapsed", !!on);
         exToggle.textContent = on ? "▸" : "▾";
         exToggle.title = on ? "Expand the region list" : "Collapse the region list";
+        if (exRsz) exRsz.style.display = on ? "none" : "";   // no resizing while collapsed (width:26px !important would ignore the drag)
         requestAnimationFrame(fitCanvas);
       }
       exToggle.addEventListener("click", () => { applyExplorerCollapsed(!node.properties.explorerCollapsed); flushChange(); });
       exHead.append(exToggle, exTitle);
       explorerEl.append(exHead, exList);
-      applyExplorerCollapsed(!!node.properties.explorerCollapsed);
       // Drag the divider to resize the explorer; the width persists in node.properties.
       const exRsz = document.createElement("div");
       exRsz.className = "ai2go-ideo-exrsz";
@@ -823,11 +823,12 @@ app.registerExtension({
         const scale = (node.properties.dockPinned && app.canvas) ? (app.canvas.ds.scale || 1) : 1;
         const sx = e.clientX, w0 = explorerEl.offsetWidth;
         dragPointer(e, exRsz, (me) => {
-          const w = Math.max(120, Math.min(w0 + (me.clientX - sx) / scale, wrap.clientWidth - 140));
+          const w = Math.max(120, Math.min(w0 + (me.clientX - sx) / scale, cvRow.clientWidth - 140 - exRsz.offsetWidth - 8));
           node.properties.explorerW = Math.round(w); explorerEl.style.width = node.properties.explorerW + "px";
           fitCanvas();
         }, flushChange);
       });
+      applyExplorerCollapsed(!!node.properties.explorerCollapsed);   // initial state (exRsz now exists, so the resizer toggles too)
       // Canvas + explorer share a horizontal row; cvBox stays flex:1 so fitCanvas() adapts to the rail width.
       const cvRow = document.createElement("div");
       cvRow.className = "ai2go-ideo-cvrow";
@@ -1927,7 +1928,7 @@ app.registerExtension({
         node._placing = true;
         canvasEl.focus();
         canvasEl.style.cursor = "move";
-        serialize(); renderPanel(); drawCanvas(); updateTokens();
+        serialize(); renderPanel(); renderExplorer(); drawCanvas(); updateTokens();
       }
       function finishPlacing() {
         if (!node._placing) return;
@@ -2657,11 +2658,15 @@ app.registerExtension({
                 }
               }
             };
-            const up = () => {
+            const cleanup = () => {
               document.removeEventListener("pointermove", move);
               document.removeEventListener("pointerup", up);
               document.removeEventListener("pointercancel", up);
               document.body.classList.remove("ai2go-ideo-dragging");
+              node._exDragCleanup = null;
+            };
+            const up = () => {
+              cleanup();
               if (dragging) {
                 row.classList.remove("dragging");
                 row._dragged = true;                             // suppress the trailing click
@@ -2670,16 +2675,24 @@ app.registerExtension({
                 if (order.length === node._boxes.length) node._boxes = order;
                 selectOnly(active ? node._boxes.indexOf(active) : -1);  // reorder invalidates multi-select indices
                 renumber();
-                commit();
+                // DOM rows are already reordered in place — do NOT renderExplorer() here: it would clear
+                // exList and destroy this row before its trailing click is suppressed. Repaint everything else.
+                serialize(); renderPanel(); drawCanvas(); updateTokens(); flushChange();
               }
             };
             document.addEventListener("pointermove", move);
             document.addEventListener("pointerup", up);
             document.addEventListener("pointercancel", up);
+            node._exDragCleanup = cleanup;                       // so onRemoved can drop these if the node dies mid-drag
           });
         });
+        // Scroll the active row into view only when it's actually off-screen (commit() runs on every
+        // canvas edit, so an unconditional scrollIntoView would churn the dock/page scroll).
         const activeRow = exList.querySelector(".ai2go-ideo-lrow.active");
-        if (activeRow) activeRow.scrollIntoView({ block: "nearest" });
+        if (activeRow && !node.properties.explorerCollapsed) {
+          const lr = exList.getBoundingClientRect(), ar = activeRow.getBoundingClientRect();
+          if (ar.top < lr.top || ar.bottom > lr.bottom) activeRow.scrollIntoView({ block: "nearest" });
+        }
       }
 
       // ── width/height widget callbacks ──
@@ -2758,6 +2771,7 @@ app.registerExtension({
 
       chainCallback(node, "onRemoved", function () {
         livePreviewNodes.delete(node);
+        node._exDragCleanup?.();                          // drop any in-progress explorer drag listeners
         if (hoveredCanvasNode === node) hoveredCanvasNode = null;
         if (node._fullscreen) {                       // tear down the popup if open
           document.removeEventListener("keydown", onFsEsc, true);
