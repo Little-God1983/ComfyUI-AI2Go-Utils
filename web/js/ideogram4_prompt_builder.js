@@ -425,6 +425,11 @@ function injectStyle() {
     .ai2go-ideo-exrsz:hover { background:#46b4e6; }
     .ai2go-ideo-extoggle { background:none; border:none; color:#aaa; cursor:pointer; font:12px sans-serif; line-height:1; padding:2px 4px; flex:0 0 auto; }
     .ai2go-ideo-extoggle:hover { color:#fff; }
+    .ai2go-ideo-exptri { flex:0 0 auto; width:13px; text-align:center; color:#888; cursor:pointer; font:9px monospace; user-select:none; }
+    .ai2go-ideo-exptri:hover { color:#fff; }
+    .ai2go-ideo-exptri.leaf { cursor:default; color:#444; }
+    .ai2go-ideo-lrow.drop-into { box-shadow:inset 0 0 0 2px #46b4e6; background:#2a3a42; }
+    .ai2go-ideo-exhead.drop-root { box-shadow:inset 0 0 0 2px #46b4e6; }
   `;
   document.head.appendChild(s);
 }
@@ -1534,8 +1539,41 @@ app.registerExtension({
       function ensureIds() {
         for (const b of node._boxes) if (b && !b.id) b.id = makeUUID();
       }
+      // ── region hierarchy (parenting) — editor-only; `parent` holds another box's id (or null = root).
+      function boxById(id) { return id == null ? null : node._boxes.find((b) => b.id === id); }
+      // True if `ancId` is an ancestor of `id` (walks the parent chain; guarded against malformed cycles).
+      function isAncestor(ancId, id) {
+        let cur = boxById(id), guard = 0;
+        while (cur && cur.parent != null && guard++ < 1000) {
+          if (cur.parent === ancId) return true;
+          cur = boxById(cur.parent);
+        }
+        return false;
+      }
+      // All descendant ids of `id` (excludes id itself).
+      function descendantIds(id) {
+        const kids = new Map();
+        for (const b of node._boxes) if (b.parent != null) { if (!kids.has(b.parent)) kids.set(b.parent, []); kids.get(b.parent).push(b.id); }
+        const out = new Set(), stack = [...(kids.get(id) || [])];
+        while (stack.length) { const cid = stack.pop(); if (out.has(cid)) continue; out.add(cid); for (const k of (kids.get(cid) || [])) stack.push(k); }
+        return out;
+      }
+      // Set (parentId=null clears) a box's parent, rejecting self / missing target / cycles. Returns true if applied.
+      function setParent(childId, parentId) {
+        if (childId == null || childId === parentId) return false;
+        if (parentId != null && (!boxById(parentId) || isAncestor(childId, parentId))) return false;
+        const c = boxById(childId); if (!c) return false;
+        c.parent = parentId == null ? null : parentId;
+        return true;
+      }
+      // Drop parent refs pointing at a missing box (after delete/import) so they fall back to root.
+      function ensureParentsValid() {
+        const ids = new Set(node._boxes.map((b) => b.id));
+        for (const b of node._boxes) if (b.parent != null && !ids.has(b.parent)) b.parent = null;
+      }
       function serialize() {                              // saved/restored value: clean boxes
         ensureIds();
+        ensureParentsValid();
         if (elementsWidget) elementsWidget.value = node._boxes.length ? JSON.stringify(node._boxes) : "";
         if (stylePaletteWidget) stylePaletteWidget.value = node._stylePalette.length ? JSON.stringify(node._stylePalette) : "";
       }
@@ -1559,6 +1597,8 @@ app.registerExtension({
       function touch() { serialize(); drawCanvas(); updateTokens(); }
 
       function removeBox(i) {
+        const rem = node._boxes[i];
+        if (rem) for (const b of node._boxes) if (b.parent === rem.id) b.parent = (rem.parent != null ? rem.parent : null);  // promote children to grandparent
         node._boxes.splice(i, 1);
         node._selection = new Set();
         if (node._boxes.length === 0) node._activeIdx = -1;
@@ -1620,9 +1660,20 @@ app.registerExtension({
           node._activeIdx = hit.index;
           node._dragMode = hit.mode;
           node._boxAtStart = { ...node._boxes[hit.index] };
-          if (node._selection.size > 1) {                  // snapshot the whole group for group move/resize
+          // Build the drag group. A MOVE drags each selected box's whole subtree (parenting: move a parent
+          // and its children follow); a RESIZE affects only the explicitly-selected boxes (children don't scale).
+          const groupIdx = new Set(node._selection);
+          if (hit.mode === "move") {
+            for (const si of [...node._selection]) {
+              for (const did of descendantIds(node._boxes[si].id)) {
+                const di = node._boxes.findIndex((b) => b.id === did);
+                if (di >= 0 && !node._boxes[di].locked) groupIdx.add(di);   // locked descendants stay put
+              }
+            }
+          }
+          if (groupIdx.size > 1) {                          // snapshot the whole group for group move/resize
             node._groupStart = {};
-            for (const i of node._selection) node._groupStart[i] = { ...node._boxes[i] };
+            for (const i of groupIdx) node._groupStart[i] = { ...node._boxes[i] };
           }
         } else {
           node._dragMode = "draw";
@@ -1739,7 +1790,7 @@ app.registerExtension({
       // Paste the clipboard regions as a group, centered under the cursor, keeping their layout.
       function pasteBoxes() {
         if (!copiedBoxes || !copiedBoxes.length) return;
-        const clones = copiedBoxes.map((b) => { const c = JSON.parse(JSON.stringify(b)); delete c.locked; delete c.id; return c; });  // pasted = editable, fresh id
+        const clones = copiedBoxes.map((b) => { const c = JSON.parse(JSON.stringify(b)); delete c.locked; delete c.id; delete c.parent; return c; });  // pasted = editable, fresh id, root
         let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
         for (const b of clones) {
           minx = Math.min(minx, b.x); miny = Math.min(miny, b.y);
@@ -1922,7 +1973,7 @@ app.registerExtension({
         const src = node._boxes[srcIdx];
         if (!src) return;
         const nb = JSON.parse(JSON.stringify(src));
-        delete nb.nobbox; delete nb.locked; delete nb.id;  // a duplicate is editable, not born locked, fresh id
+        delete nb.nobbox; delete nb.locked; delete nb.id; delete nb.parent;  // a duplicate is editable, not born locked, fresh id, root
         node._boxes.push(nb);
         selectOnly(node._boxes.length - 1);
         node._placing = true;
@@ -2571,14 +2622,27 @@ app.registerExtension({
           exList.appendChild(empty);
           return;
         }
-        const renumber = () => Array.from(exList.querySelectorAll(".ai2go-ideo-lrow")).forEach((row, k) => {
-          row.querySelector(".ai2go-ideo-lnum").textContent = String(k + 1).padStart(2, "0");
-        });
-        node._boxes.forEach((b, i) => {
+        // Build the hierarchy: children grouped by parent id (kept in array / z-order); roots under "__root__".
+        const kids = new Map();
+        const idsPresent = new Set(node._boxes.map((b) => b.id));
+        for (const b of node._boxes) {
+          const key = (b.parent != null && idsPresent.has(b.parent)) ? b.parent : "__root__";
+          if (!kids.has(key)) kids.set(key, []);
+          kids.get(key).push(b);
+        }
+
+        const mkRow = (b, depth) => {
+          const i = node._boxes.indexOf(b);
+          const hasKids = kids.has(b.id);
           const row = document.createElement("div");
-          // primary (active) row is solid; other selected rows get a subtle ring via .active too
+          // active row solid; other selected rows also get the .active ring
           row.className = "ai2go-ideo-lrow" + ((i === node._activeIdx || node._selection.has(i)) ? " active" : "");
+          row.style.paddingLeft = (4 + depth * 13) + "px";    // indentation = tree depth
           row._box = b;
+          const tri = document.createElement("span");
+          tri.className = "ai2go-ideo-exptri" + (hasKids ? "" : " leaf");
+          tri.textContent = hasKids ? (b.collapsed ? "▶" : "▼") : "•";
+          if (hasKids) tri.title = b.collapsed ? "Expand children" : "Collapse children";
           const sw = document.createElement("div");
           sw.className = "ai2go-ideo-lsw";
           sw.style.background = (b.palette || []).find(Boolean) || "#8c8c8c";
@@ -2598,11 +2662,16 @@ app.registerExtension({
           dup.title = "Duplicate, then click on the canvas to place";
           const del = document.createElement("button");
           del.className = "ai2go-ideo-lbtn del"; del.textContent = "✕";
-          del.title = b.locked ? "Unlock to delete" : "Delete region";
+          del.title = b.locked ? "Unlock to delete" : "Delete region (children promote to its parent)";
           del.disabled = !!b.locked;
-          row.append(sw, num, txt, lock, dup, del);
+          row.append(tri, sw, num, txt, lock, dup, del);
           exList.appendChild(row);
 
+          if (hasKids) tri.addEventListener("click", (e) => {
+            e.stopPropagation();
+            b.collapsed = !b.collapsed;
+            serialize(); renderExplorer(); flushChange();    // persist + rebuild; no canvas churn
+          });
           lock.addEventListener("click", (e) => {
             e.stopPropagation();
             b.locked = !b.locked;
@@ -2614,7 +2683,7 @@ app.registerExtension({
             commit();
           });
           row.addEventListener("click", () => {
-            if (row._dragged) { row._dragged = false; return; }
+            if (node._exSuppressClick) return;               // ignore the click that trails a reparent drag
             canvasEl.focus();                                // show the selection on canvas + route Del/Ctrl+C here
             selectOnly(node._boxes.indexOf(b));
             commit();
@@ -2626,34 +2695,33 @@ app.registerExtension({
             if (idx < 0) return;
             removeBox(idx); commit(); fitCanvas();
           });
-          // drag-reorder (vertical FLIP) — mirrors the right-click region list; index 0 = front
+          // Drag a row to RE-PARENT it: drop ONTO another row → become its child; drop on the "Regions"
+          // header → back to root. Cycle-guarded (can't drop onto self or a descendant).
           row.addEventListener("pointerdown", (e) => {
-            if (e.button !== 0 || e.target === lock || e.target === dup || e.target === del) return;
+            if (e.button !== 0 || e.target === lock || e.target === dup || e.target === del || e.target === tri) return;
             e.preventDefault(); e.stopPropagation();
             const sx = e.clientX, sy = e.clientY;
-            let dragging = false;
+            let dragging = false, targetRow = null, toRoot = false;
+            const clearCue = () => {
+              for (const r of exList.querySelectorAll(".ai2go-ideo-lrow.drop-into")) r.classList.remove("drop-into");
+              exHead.classList.remove("drop-root");
+            };
             const move = (me) => {
               if (!dragging) {
                 if (Math.abs(me.clientX - sx) + Math.abs(me.clientY - sy) < 4) return;
                 dragging = true; row.classList.add("dragging"); document.body.classList.add("ai2go-ideo-dragging");
               }
+              clearCue(); targetRow = null; toRoot = false;
+              const hr = exHead.getBoundingClientRect();
+              if (me.clientX >= hr.left && me.clientX <= hr.right && me.clientY >= hr.top && me.clientY <= hr.bottom) {
+                toRoot = true; exHead.classList.add("drop-root"); return;       // header zone → unparent
+              }
               for (const other of exList.querySelectorAll(".ai2go-ideo-lrow")) {
                 if (other === row) continue;
                 const r = other.getBoundingClientRect();
                 if (me.clientY >= r.top && me.clientY <= r.bottom) {
-                  const ref = me.clientY > r.top + r.height / 2 ? other.nextSibling : other;
-                  if (ref === row || ref === row.nextSibling) break;
-                  const els = Array.from(exList.querySelectorAll(".ai2go-ideo-lrow"));
-                  const prev = els.map((el) => el.getBoundingClientRect().top);
-                  exList.insertBefore(row, ref);
-                  els.forEach((el, k) => {                        // FLIP: slide to new positions
-                    const dy = prev[k] - el.getBoundingClientRect().top;
-                    if (!dy) return;
-                    el.style.transition = "none";
-                    el.style.transform = `translateY(${dy}px)`;
-                    el.getBoundingClientRect();                   // flush
-                    el.style.transition = ""; el.style.transform = "";
-                  });
+                  const tb = other._box;
+                  if (tb && tb.id !== b.id && !isAncestor(b.id, tb.id)) { targetRow = other; other.classList.add("drop-into"); }
                   break;
                 }
               }
@@ -2666,26 +2734,26 @@ app.registerExtension({
               node._exDragCleanup = null;
             };
             const up = () => {
-              cleanup();
-              if (dragging) {
-                row.classList.remove("dragging");
-                row._dragged = true;                             // suppress the trailing click
-                const active = node._boxes[node._activeIdx];
-                const order = Array.from(exList.querySelectorAll(".ai2go-ideo-lrow")).map((el) => el._box);
-                if (order.length === node._boxes.length) node._boxes = order;
-                selectOnly(active ? node._boxes.indexOf(active) : -1);  // reorder invalidates multi-select indices
-                renumber();
-                // DOM rows are already reordered in place — do NOT renderExplorer() here: it would clear
-                // exList and destroy this row before its trailing click is suppressed. Repaint everything else.
-                serialize(); renderPanel(); drawCanvas(); updateTokens(); flushChange();
-              }
+              cleanup(); clearCue();
+              if (!dragging) return;
+              row.classList.remove("dragging");
+              // commit() below rebuilds the tree (destroying this row), so suppress the trailing click.
+              node._exSuppressClick = true; setTimeout(() => { node._exSuppressClick = false; }, 0);
+              let changed = false;
+              if (toRoot) changed = setParent(b.id, null);
+              else if (targetRow) changed = setParent(b.id, targetRow._box.id);
+              if (changed) { selectOnly(node._boxes.indexOf(b)); commit(); }
             };
             document.addEventListener("pointermove", move);
             document.addEventListener("pointerup", up);
             document.addEventListener("pointercancel", up);
             node._exDragCleanup = cleanup;                       // so onRemoved can drop these if the node dies mid-drag
           });
-        });
+
+          if (hasKids && !b.collapsed) for (const child of kids.get(b.id)) mkRow(child, depth + 1);
+        };
+        for (const b of (kids.get("__root__") || [])) mkRow(b, 0);
+
         // Scroll the active row into view only when it's actually off-screen (commit() runs on every
         // canvas edit, so an unconditional scrollIntoView would churn the dock/page scroll).
         const activeRow = exList.querySelector(".ai2go-ideo-lrow.active");
