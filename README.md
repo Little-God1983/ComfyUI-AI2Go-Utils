@@ -16,7 +16,7 @@ Clone into your ComfyUI `custom_nodes` directory and restart ComfyUI:
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/AIKnowledge2Go/ComfyUI-AI2Go-Utils
+git clone https://github.com/Little-God1983/ComfyUI-AI2Go-Utils
 ```
 
 ## Nodes

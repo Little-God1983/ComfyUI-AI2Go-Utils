@@ -14,8 +14,7 @@ jobs:
   publish-node:
     name: Publish Custom Node to registry
     runs-on: ubuntu-latest
-    # TODO: set this to your GitHub owner so forks don't publish on your behalf.
-    if: ${{ github.repository_owner == 'AIKnowledge2Go' }}
+    if: ${{ github.repository_owner == 'Little-God1983' }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
