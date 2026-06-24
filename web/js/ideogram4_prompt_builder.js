@@ -1563,13 +1563,26 @@ app.registerExtension({
         if (childId == null || childId === parentId) return false;
         if (parentId != null && (!boxById(parentId) || isAncestor(childId, parentId))) return false;
         const c = boxById(childId); if (!c) return false;
-        c.parent = parentId == null ? null : parentId;
+        const np = parentId == null ? null : parentId;
+        if ((c.parent ?? null) === np) return false;     // already this parent — no-op, don't churn a commit
+        c.parent = np;
         return true;
       }
-      // Drop parent refs pointing at a missing box (after delete/import) so they fall back to root.
+      // Keep parent refs sane after delete/import/restore (a hand-edited or imported save may carry
+      // garbage): drop refs to a missing box, null self-parents, and break cycles — otherwise the
+      // affected boxes never key to a root in renderExplorer and silently vanish from the tree.
       function ensureParentsValid() {
         const ids = new Set(node._boxes.map((b) => b.id));
-        for (const b of node._boxes) if (b.parent != null && !ids.has(b.parent)) b.parent = null;
+        for (const b of node._boxes) if (b.parent != null && (!ids.has(b.parent) || b.parent === b.id)) b.parent = null;
+        for (const b of node._boxes) {                    // cut any cycle by nulling the back-edge
+          const seen = new Set([b.id]);
+          let cur = b, guard = 0;
+          while (cur && cur.parent != null && guard++ < 10000) {
+            if (seen.has(cur.parent)) { cur.parent = null; break; }
+            seen.add(cur.parent);
+            cur = boxById(cur.parent);
+          }
+        }
       }
       function serialize() {                              // saved/restored value: clean boxes
         ensureIds();
@@ -1610,6 +1623,11 @@ app.registerExtension({
         const idxs = [...node._selection].sort((a, b) => b - a).filter((i) => !node._boxes[i]?.locked);  // keep locked
         if (!idxs.length && node._activeIdx >= 0 && !node._boxes[node._activeIdx]?.locked) idxs.push(node._activeIdx);
         if (!idxs.length) return;
+        // Promote orphans to the nearest surviving ancestor (matching the per-row ✕ delete), skipping over
+        // any co-deleted parents, before removing the boxes.
+        const removed = new Set(idxs.map((i) => node._boxes[i].id));
+        const survivorParent = (pid) => { let g = 0; while (pid != null && removed.has(pid) && g++ < 1000) pid = boxById(pid)?.parent ?? null; return pid; };
+        for (const b of node._boxes) if (b.parent != null && removed.has(b.parent)) b.parent = survivorParent(b.parent);
         for (const i of idxs) node._boxes.splice(i, 1);
         node._selection = new Set();
         node._activeIdx = node._boxes.length ? Math.min(idxs[idxs.length - 1], node._boxes.length - 1) : -1;
@@ -1664,12 +1682,12 @@ app.registerExtension({
           // and its children follow); a RESIZE affects only the explicitly-selected boxes (children don't scale).
           const groupIdx = new Set(node._selection);
           if (hit.mode === "move") {
-            for (const si of [...node._selection]) {
-              for (const did of descendantIds(node._boxes[si].id)) {
-                const di = node._boxes.findIndex((b) => b.id === did);
-                if (di >= 0 && !node._boxes[di].locked) groupIdx.add(di);   // locked descendants stay put
-              }
-            }
+            // Add each selected box's movable descendants, but do NOT descend through a locked box — a
+            // locked box and its whole subtree stay put, so its children aren't detached from it.
+            const kmap = new Map();
+            for (const bb of node._boxes) if (bb.parent != null) { if (!kmap.has(bb.parent)) kmap.set(bb.parent, []); kmap.get(bb.parent).push(bb); }
+            const addSub = (pid) => { for (const ch of (kmap.get(pid) || [])) { if (ch.locked) continue; groupIdx.add(node._boxes.indexOf(ch)); addSub(ch.id); } };
+            for (const si of [...node._selection]) addSub(node._boxes[si].id);
           }
           if (groupIdx.size > 1) {                          // snapshot the whole group for group move/resize
             node._groupStart = {};
@@ -1845,16 +1863,16 @@ app.registerExtension({
         const dN = { x: mN.x - node._dragStartN.x, y: mN.y - node._dragStartN.y };
         if (Math.abs(dN.x) + Math.abs(dN.y) > 0.001) node._pendingCollapse = -1;  // it's a drag, not a click
         if (node._dragMode === "move" && node._groupStart) {
-          let dx = dN.x, dy = dN.y;                   // clamp delta so the whole group stays in bounds
-          for (const i in node._groupStart) {
-            const s = node._groupStart[i];
-            dx = Math.min(Math.max(dx, -s.x), 1 - s.w - s.x);
-            dy = Math.min(Math.max(dy, -s.y), 1 - s.h - s.y);
-          }
-          if (node.properties.snap) {                 // snap the group's movement to whole grid cells
+          let dx = dN.x, dy = dN.y;
+          if (node.properties.snap) {                 // snap the group's movement to whole grid cells FIRST
             const { sx, sy } = gridStep();
             dx = Math.round(dx / sx) * sx;
             dy = Math.round(dy / sy) * sy;
+          }
+          for (const i in node._groupStart) {         // then clamp so the whole group stays in bounds (clamp wins over snap)
+            const s = node._groupStart[i];
+            dx = Math.min(Math.max(dx, -s.x), 1 - s.w - s.x);
+            dy = Math.min(Math.max(dy, -s.y), 1 - s.h - s.y);
           }
           for (const i in node._groupStart) {
             const s = node._groupStart[i];
@@ -2683,7 +2701,7 @@ app.registerExtension({
             commit();
           });
           row.addEventListener("click", () => {
-            if (node._exSuppressClick) return;               // ignore the click that trails a reparent drag
+            if (node._exSuppressClick) { node._exSuppressClick = false; return; }  // swallow the click that trails a reparent drag
             canvasEl.focus();                                // show the selection on canvas + route Del/Ctrl+C here
             selectOnly(node._boxes.indexOf(b));
             commit();
@@ -2721,7 +2739,7 @@ app.registerExtension({
                 const r = other.getBoundingClientRect();
                 if (me.clientY >= r.top && me.clientY <= r.bottom) {
                   const tb = other._box;
-                  if (tb && tb.id !== b.id && !isAncestor(b.id, tb.id)) { targetRow = other; other.classList.add("drop-into"); }
+                  if (tb && tb.id !== b.id && tb.id !== (b.parent ?? null) && !isAncestor(b.id, tb.id)) { targetRow = other; other.classList.add("drop-into"); }
                   break;
                 }
               }
@@ -2747,7 +2765,7 @@ app.registerExtension({
             document.addEventListener("pointermove", move);
             document.addEventListener("pointerup", up);
             document.addEventListener("pointercancel", up);
-            node._exDragCleanup = cleanup;                       // so onRemoved can drop these if the node dies mid-drag
+            node._exDragCleanup?.(); node._exDragCleanup = cleanup;  // clear any stale drag first; onRemoved drops these if the node dies mid-drag
           });
 
           if (hasKids && !b.collapsed) for (const child of kids.get(b.id)) mkRow(child, depth + 1);
