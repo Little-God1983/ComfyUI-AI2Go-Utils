@@ -1,0 +1,26 @@
+name: Publish to Comfy registry
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "pyproject.toml"
+
+permissions:
+  issues: write
+
+jobs:
+  publish-node:
+    name: Publish Custom Node to registry
+    runs-on: ubuntu-latest
+    # TODO: set this to your GitHub owner so forks don't publish on your behalf.
+    if: ${{ github.repository_owner == 'AIKnowledge2Go' }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Publish Custom Node
+        uses: Comfy-Org/publish-node-action@v1
+        with:
+          # Create a Comfy Registry API key and store it as the REGISTRY_ACCESS_TOKEN repo secret.
+          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}

@@ -1,0 +1,19 @@
+[project]
+name = "comfyui-ai2go-utils"
+description = "ComfyUI utility nodes by AIKnowledge2Go."
+version = "0.0.1"
+license = { file = "LICENSE" }
+dependencies = [
+    "pillow>=10.3.0",
+]
+
+[project.urls]
+# TODO: set to the real GitHub repository before publishing to the Comfy Registry.
+Repository = "https://github.com/AIKnowledge2Go/ComfyUI-AI2Go-Utils"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+# TODO: set PublisherId to your registry publisher id (create one at https://registry.comfy.org).
+PublisherId = "aiknowledge2go"
+DisplayName = "ComfyUI-AI2Go-Utils"
+Icon = ""
