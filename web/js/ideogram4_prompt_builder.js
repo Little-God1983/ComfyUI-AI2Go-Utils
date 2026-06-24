@@ -5,7 +5,7 @@
  * by Kijai, licensed under GPL-3.0; this file and pack remain GPL-3.0.
  * Upstream: https://github.com/kijai/ComfyUI-KJNodes
  */
-import { chainCallback, addMiddleClickPan, addWheelPassthrough, cursorForBboxMode, watchImageInputs, captureVideoFrame } from './utility.js';
+import { chainCallback, addMiddleClickPan, addWheelPassthrough, cursorForBboxMode, watchImageInputs, captureVideoFrame, makeUUID } from './utility.js';
 const { app } = window.comfyAPI.app;
 
 const HANDLE = 8;            // hit radius (canvas px) for corners/edges
@@ -414,6 +414,17 @@ function injectStyle() {
     .ai2go-ideo-bglbl { color:#888; font:11px sans-serif; flex:0 0 auto; min-width:62px; }
     .ai2go-ideo-trow { padding:2px 4px; border-radius:4px; }
     .ai2go-ideo-trow:hover { background:#333; }
+    .ai2go-ideo-cvrow { display:flex; flex:1 1 auto; min-height:60px; gap:4px; overflow:hidden; }
+    .ai2go-ideo-explorer { flex:0 0 auto; display:flex; flex-direction:column; background:#202020; border:1px solid #333; border-radius:4px; overflow:hidden; min-width:0; }
+    .ai2go-ideo-explorer.collapsed { width:26px !important; }
+    .ai2go-ideo-exhead { display:flex; align-items:center; gap:4px; padding:3px 4px; background:#2a2a2a; font:11px sans-serif; color:#aaa; user-select:none; flex:0 0 auto; }
+    .ai2go-ideo-extitle { flex:1 1 auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .ai2go-ideo-explorer.collapsed .ai2go-ideo-extitle, .ai2go-ideo-explorer.collapsed .ai2go-ideo-exlist { display:none; }
+    .ai2go-ideo-exlist { flex:1 1 auto; overflow-y:auto; overflow-x:hidden; min-height:0; padding:3px; display:flex; flex-direction:column; gap:1px; }
+    .ai2go-ideo-exrsz { flex:0 0 auto; width:5px; cursor:ew-resize; align-self:stretch; border-radius:2px; }
+    .ai2go-ideo-exrsz:hover { background:#46b4e6; }
+    .ai2go-ideo-extoggle { background:none; border:none; color:#aaa; cursor:pointer; font:12px sans-serif; line-height:1; padding:2px 4px; flex:0 0 auto; }
+    .ai2go-ideo-extoggle:hover { color:#fff; }
   `;
   document.head.appendChild(s);
 }
@@ -775,6 +786,53 @@ app.registerExtension({
       cvBox.className = "ai2go-ideo-cv";
       cvBox.appendChild(canvasEl);
 
+      // ── Object Explorer: a persistent, collapsible list of every region (Unity-style scene panel).
+      // Lives left of the canvas; click a row to select (two-way with the canvas) so you can pick/edit
+      // a region without dragging it by accident. renderExplorer() (defined below) fills exList.
+      const explorerEl = document.createElement("div");
+      explorerEl.className = "ai2go-ideo-explorer";
+      explorerEl.style.width = (node.properties.explorerW || 190) + "px";
+      const exHead = document.createElement("div");
+      exHead.className = "ai2go-ideo-exhead";
+      const exToggle = document.createElement("button");
+      exToggle.className = "ai2go-ideo-extoggle";
+      stopProp(exToggle);
+      const exTitle = document.createElement("span");
+      exTitle.className = "ai2go-ideo-extitle";
+      exTitle.textContent = "Regions";
+      const exList = document.createElement("div");
+      exList.className = "ai2go-ideo-exlist";
+      stopProp(exList);
+      function applyExplorerCollapsed(on) {
+        node.properties.explorerCollapsed = !!on;
+        explorerEl.classList.toggle("collapsed", !!on);
+        exToggle.textContent = on ? "▸" : "▾";
+        exToggle.title = on ? "Expand the region list" : "Collapse the region list";
+        requestAnimationFrame(fitCanvas);
+      }
+      exToggle.addEventListener("click", () => { applyExplorerCollapsed(!node.properties.explorerCollapsed); flushChange(); });
+      exHead.append(exToggle, exTitle);
+      explorerEl.append(exHead, exList);
+      applyExplorerCollapsed(!!node.properties.explorerCollapsed);
+      // Drag the divider to resize the explorer; the width persists in node.properties.
+      const exRsz = document.createElement("div");
+      exRsz.className = "ai2go-ideo-exrsz";
+      exRsz.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const scale = (node.properties.dockPinned && app.canvas) ? (app.canvas.ds.scale || 1) : 1;
+        const sx = e.clientX, w0 = explorerEl.offsetWidth;
+        dragPointer(e, exRsz, (me) => {
+          const w = Math.max(120, Math.min(w0 + (me.clientX - sx) / scale, wrap.clientWidth - 140));
+          node.properties.explorerW = Math.round(w); explorerEl.style.width = node.properties.explorerW + "px";
+          fitCanvas();
+        }, flushChange);
+      });
+      // Canvas + explorer share a horizontal row; cvBox stays flex:1 so fitCanvas() adapts to the rail width.
+      const cvRow = document.createElement("div");
+      cvRow.className = "ai2go-ideo-cvrow";
+      cvRow.append(explorerEl, exRsz, cvBox);
+
       // Draggable separator between the canvas and the prompt panel — drag up for more prompt, down for more canvas.
       const splitter = document.createElement("div");
       splitter.className = "ai2go-ideo-split";
@@ -792,7 +850,7 @@ app.registerExtension({
         }, flushChange);
       });
 
-      wrap.appendChild(bar); wrap.appendChild(styleBar); wrap.appendChild(cvBox); wrap.appendChild(splitter); wrap.appendChild(panel);
+      wrap.appendChild(bar); wrap.appendChild(styleBar); wrap.appendChild(cvRow); wrap.appendChild(splitter); wrap.appendChild(panel);
 
       // The editor is NOT a node widget — it lives in the floating dock (built in undock()), so the node
       // is an ordinary widgets-only node that ComfyUI sizes/persists with zero custom height handling.
@@ -1470,7 +1528,13 @@ app.registerExtension({
         const link = node.graph?.links?.[node.inputs?.find((i) => i.name === "import_json")?.link];
         return !!link && ![2, 4].includes(node.graph.getNodeById(link.origin_id)?.mode);
       };
+      // Stamp a stable id on any box missing one — identity for the Object Explorer and (future)
+      // parenting. Editor-only: Python builds caption elements from known keys, so id never exports.
+      function ensureIds() {
+        for (const b of node._boxes) if (b && !b.id) b.id = makeUUID();
+      }
       function serialize() {                              // saved/restored value: clean boxes
+        ensureIds();
         if (elementsWidget) elementsWidget.value = node._boxes.length ? JSON.stringify(node._boxes) : "";
         if (stylePaletteWidget) stylePaletteWidget.value = node._stylePalette.length ? JSON.stringify(node._stylePalette) : "";
       }
@@ -1489,7 +1553,7 @@ app.registerExtension({
         };
       }
 
-      function commit() { serialize(); renderPanel(); drawCanvas(); updateTokens(); flushChange(); }  // flush so canvas edits persist without a defocus
+      function commit() { serialize(); renderPanel(); renderExplorer(); drawCanvas(); updateTokens(); flushChange(); }  // flush so canvas edits persist without a defocus
       // Live text edit: persist + repaint + token count, without rebuilding the panel.
       function touch() { serialize(); drawCanvas(); updateTokens(); }
 
@@ -1674,7 +1738,7 @@ app.registerExtension({
       // Paste the clipboard regions as a group, centered under the cursor, keeping their layout.
       function pasteBoxes() {
         if (!copiedBoxes || !copiedBoxes.length) return;
-        const clones = copiedBoxes.map((b) => { const c = JSON.parse(JSON.stringify(b)); delete c.locked; return c; });  // pasted = editable
+        const clones = copiedBoxes.map((b) => { const c = JSON.parse(JSON.stringify(b)); delete c.locked; delete c.id; return c; });  // pasted = editable, fresh id
         let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
         for (const b of clones) {
           minx = Math.min(minx, b.x); miny = Math.min(miny, b.y);
@@ -1857,7 +1921,7 @@ app.registerExtension({
         const src = node._boxes[srcIdx];
         if (!src) return;
         const nb = JSON.parse(JSON.stringify(src));
-        delete nb.nobbox; delete nb.locked;               // a duplicate is editable, not born locked
+        delete nb.nobbox; delete nb.locked; delete nb.id;  // a duplicate is editable, not born locked, fresh id
         node._boxes.push(nb);
         selectOnly(node._boxes.length - 1);
         node._placing = true;
@@ -2495,6 +2559,129 @@ app.registerExtension({
         panel.appendChild(palRow);
       }
 
+      // ── Object Explorer list ── (persistent region list; two-way selection with the canvas)
+      // Rebuilt on every commit(), so it always mirrors node._boxes / _activeIdx / _selection.
+      function renderExplorer() {
+        if (!exList) return;
+        exList.innerHTML = "";
+        if (!node._boxes.length) {
+          const empty = document.createElement("div");
+          empty.className = "ai2go-ideo-mhdr"; empty.textContent = "No regions yet — drag on the canvas to add one.";
+          exList.appendChild(empty);
+          return;
+        }
+        const renumber = () => Array.from(exList.querySelectorAll(".ai2go-ideo-lrow")).forEach((row, k) => {
+          row.querySelector(".ai2go-ideo-lnum").textContent = String(k + 1).padStart(2, "0");
+        });
+        node._boxes.forEach((b, i) => {
+          const row = document.createElement("div");
+          // primary (active) row is solid; other selected rows get a subtle ring via .active too
+          row.className = "ai2go-ideo-lrow" + ((i === node._activeIdx || node._selection.has(i)) ? " active" : "");
+          row._box = b;
+          const sw = document.createElement("div");
+          sw.className = "ai2go-ideo-lsw";
+          sw.style.background = (b.palette || []).find(Boolean) || "#8c8c8c";
+          const num = document.createElement("span");
+          num.className = "ai2go-ideo-lnum"; num.textContent = String(i + 1).padStart(2, "0");
+          const txt = document.createElement("span");
+          const label = rowLabel(b);
+          txt.className = "ai2go-ideo-ltext" + (label ? "" : " empty");
+          txt.textContent = label || (b.type === "text" ? "(text)" : "(empty)");
+          txt.title = label;
+          const lock = document.createElement("button");
+          lock.className = "ai2go-ideo-lbtn ai2go-ideo-lock" + (b.locked ? " on" : "");
+          lock.textContent = b.locked ? "🔒" : "🔓";
+          lock.title = b.locked ? "Unlock (allow moving/resizing)" : "Lock (freeze on the canvas)";
+          const dup = document.createElement("button");
+          dup.className = "ai2go-ideo-lbtn"; dup.textContent = "⧉";
+          dup.title = "Duplicate, then click on the canvas to place";
+          const del = document.createElement("button");
+          del.className = "ai2go-ideo-lbtn del"; del.textContent = "✕";
+          del.title = b.locked ? "Unlock to delete" : "Delete region";
+          del.disabled = !!b.locked;
+          row.append(sw, num, txt, lock, dup, del);
+          exList.appendChild(row);
+
+          lock.addEventListener("click", (e) => {
+            e.stopPropagation();
+            b.locked = !b.locked;
+            if (b.locked) {                                  // a locked box drops out of the selection
+              const idx = node._boxes.indexOf(b);
+              node._selection.delete(idx);
+              if (node._activeIdx === idx) node._activeIdx = node._selection.size ? [...node._selection][0] : -1;
+            }
+            commit();
+          });
+          row.addEventListener("click", () => {
+            if (row._dragged) { row._dragged = false; return; }
+            canvasEl.focus();                                // show the selection on canvas + route Del/Ctrl+C here
+            selectOnly(node._boxes.indexOf(b));
+            commit();
+          });
+          dup.addEventListener("click", (e) => { e.stopPropagation(); startPlacing(node._boxes.indexOf(b)); });
+          del.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const idx = node._boxes.indexOf(b);
+            if (idx < 0) return;
+            removeBox(idx); commit(); fitCanvas();
+          });
+          // drag-reorder (vertical FLIP) — mirrors the right-click region list; index 0 = front
+          row.addEventListener("pointerdown", (e) => {
+            if (e.button !== 0 || e.target === lock || e.target === dup || e.target === del) return;
+            e.preventDefault(); e.stopPropagation();
+            const sx = e.clientX, sy = e.clientY;
+            let dragging = false;
+            const move = (me) => {
+              if (!dragging) {
+                if (Math.abs(me.clientX - sx) + Math.abs(me.clientY - sy) < 4) return;
+                dragging = true; row.classList.add("dragging"); document.body.classList.add("ai2go-ideo-dragging");
+              }
+              for (const other of exList.querySelectorAll(".ai2go-ideo-lrow")) {
+                if (other === row) continue;
+                const r = other.getBoundingClientRect();
+                if (me.clientY >= r.top && me.clientY <= r.bottom) {
+                  const ref = me.clientY > r.top + r.height / 2 ? other.nextSibling : other;
+                  if (ref === row || ref === row.nextSibling) break;
+                  const els = Array.from(exList.querySelectorAll(".ai2go-ideo-lrow"));
+                  const prev = els.map((el) => el.getBoundingClientRect().top);
+                  exList.insertBefore(row, ref);
+                  els.forEach((el, k) => {                        // FLIP: slide to new positions
+                    const dy = prev[k] - el.getBoundingClientRect().top;
+                    if (!dy) return;
+                    el.style.transition = "none";
+                    el.style.transform = `translateY(${dy}px)`;
+                    el.getBoundingClientRect();                   // flush
+                    el.style.transition = ""; el.style.transform = "";
+                  });
+                  break;
+                }
+              }
+            };
+            const up = () => {
+              document.removeEventListener("pointermove", move);
+              document.removeEventListener("pointerup", up);
+              document.removeEventListener("pointercancel", up);
+              document.body.classList.remove("ai2go-ideo-dragging");
+              if (dragging) {
+                row.classList.remove("dragging");
+                row._dragged = true;                             // suppress the trailing click
+                const active = node._boxes[node._activeIdx];
+                const order = Array.from(exList.querySelectorAll(".ai2go-ideo-lrow")).map((el) => el._box);
+                if (order.length === node._boxes.length) node._boxes = order;
+                selectOnly(active ? node._boxes.indexOf(active) : -1);  // reorder invalidates multi-select indices
+                renumber();
+                commit();
+              }
+            };
+            document.addEventListener("pointermove", move);
+            document.addEventListener("pointerup", up);
+            document.addEventListener("pointercancel", up);
+          });
+        });
+        const activeRow = exList.querySelector(".ai2go-ideo-lrow.active");
+        if (activeRow) activeRow.scrollIntoView({ block: "nearest" });
+      }
+
       // ── width/height widget callbacks ──
       for (const w of [wWidget, hWidget]) {
         if (!w) continue;
@@ -2677,9 +2864,12 @@ app.registerExtension({
         autoLbl._cb.checked = node.properties.textAutoPlace !== false;
         sizeSlider.value = node.properties.textSize || 12;
         boxOpacSlider.value = node.properties.boxOpacity == null ? 14 : node.properties.boxOpacity;
+        if (node.properties.explorerW) explorerEl.style.width = node.properties.explorerW + "px";
+        applyExplorerCollapsed(!!node.properties.explorerCollapsed);
         syncCanvasToDims();
         rebuildStylePalette();
         renderPanel();
+        renderExplorer();
         drawCanvas();
         updateTokens();
         // configure() shrinks the node to content height (multiline widgets) before this runs — for a
@@ -2699,6 +2889,7 @@ app.registerExtension({
         syncCanvasToDims();
         rebuildStylePalette();
         renderPanel();
+        renderExplorer();
         drawCanvas();
         updateTokens();
         if (!node._configured) ensureDocked(true);           // fresh node: pop the dock under it, matching its width

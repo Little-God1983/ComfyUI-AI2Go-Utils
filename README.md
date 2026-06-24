@@ -21,7 +21,16 @@ git clone https://github.com/Little-God1983/ComfyUI-AI2Go-Utils
 
 ## Nodes
 
-_Coming soon._
+### AI2Go Ideogram 4 Prompt Builder
+
+A visual prompt builder for Ideogram 4's structured JSON caption format. Draw bounding-box
+regions on a canvas, set each region's type / description / text / colors, and the node assembles
+the caption JSON.
+
+Includes an **Object Explorer** — a docked, collapsible list of every region. Click a row to
+select it (two-way with the canvas), so you can pick and edit regions without accidentally
+nudging them on the canvas. Reorder, lock, duplicate, and delete from the list. (Region
+parenting / hierarchy is planned.)
 
 ## License & Credits
 
