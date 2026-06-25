@@ -1209,6 +1209,7 @@ app.registerExtension({
         const hits = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
         for (let i = 0; i < node._boxes.length; i++) {
           const b = node._boxes[i];
+          if (b.group) { rects[i] = null; continue; }       // groups draw their own name chip; no number badge
           const x1 = b.x * W, y1 = b.y * H, x2 = (b.x + b.w) * W, y2 = (b.y + b.h) * H;
           const tag = String(i + 1).padStart(2, "0");
           const w = ctx.measureText(tag).width + 8;
@@ -1232,7 +1233,7 @@ app.registerExtension({
         const px = mN.x * logW(), py = mN.y * logH();
         const rects = tagRects();
         for (let i = node._boxes.length - 1; i >= 0; i--) {
-          if (node._boxes[i].locked) continue;             // locked badges aren't interactive
+          if (node._boxes[i].locked || node._boxes[i].group) continue;   // locked / group badges aren't interactive
           const r = rects[i];
           if (r && px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) return i;
         }
@@ -1457,7 +1458,7 @@ app.registerExtension({
             const gcol = pal.length ? pal[0] : "#46b4e6";
             if (selected) { ctx.fillStyle = "rgba(26,26,26,0.55)"; ctx.fillRect(x1, y1, w, h); }
             ctx.save();
-            ctx.setLineDash([8, 5]);
+            ctx.setLineDash(b.locked ? [3, 3] : [8, 5]);     // locked group → tight dash (frozen)
             ctx.strokeStyle = gcol; ctx.lineWidth = selected ? 2 : (hovered ? 1.5 : 1);
             ctx.strokeRect(x1 + 1, y1 + 1, w - 2, h - 2);
             ctx.setLineDash([]);
@@ -1468,6 +1469,7 @@ app.registerExtension({
             ctx.save(); ctx.beginPath(); ctx.rect(x1, y1, w, 14); ctx.clip();
             ctx.fillStyle = textOn(gcol); ctx.fillText(nm, x1 + 4, y1 + 11);
             ctx.restore();
+            if (b.locked) { ctx.font = "10px sans-serif"; ctx.fillStyle = "#ddd"; ctx.fillText("🔒", Math.min(x1 + tw + 2, x2 - 14), y1 + 11); }
             if (selected) {                                  // orange selection ring (solid = active, dashed = also-selected)
               const olw = active ? 2 : 1;
               ctx.strokeStyle = "#ff8c00"; ctx.lineWidth = olw;
@@ -1877,7 +1879,7 @@ app.registerExtension({
       function copySelection() {
         const idxs = node._selection.size ? [...node._selection].sort((a, b) => a - b)
           : (node._activeIdx >= 0 ? [node._activeIdx] : []);
-        return idxs.map((i) => JSON.parse(JSON.stringify(node._boxes[i])));
+        return idxs.filter((i) => !node._boxes[i].group).map((i) => JSON.parse(JSON.stringify(node._boxes[i])));
       }
       // Paste the clipboard regions as a group, centered under the cursor, keeping their layout.
       function pasteBoxes() {
@@ -1951,7 +1953,7 @@ app.registerExtension({
           for (const i in node._groupStart) {
             const s = node._groupStart[i];
             node._boxes[i] = { ...s, x: s.x + dx, y: s.y + dy };
-            delete node._boxes[i].nobbox;
+            if (node._selection.has(Number(i))) delete node._boxes[i].nobbox;   // only directly-selected boxes get placed; pulled-in descendants keep nobbox
           }
           drawCanvas(); updateBboxLabel();
           return;
@@ -1970,7 +1972,7 @@ app.registerExtension({
               ...s, x: ax + (s.x - ax) * scaleX, y: ay + (s.y - ay) * scaleY,
               w: s.w * scaleX, h: s.h * scaleY,
             });
-            delete node._boxes[i].nobbox;
+            if (node._selection.has(Number(i))) delete node._boxes[i].nobbox;   // only directly-selected boxes get placed; pulled-in descendants keep nobbox
           }
           drawCanvas(); updateBboxLabel();
           return;
@@ -2063,7 +2065,7 @@ app.registerExtension({
       }
       function startPlacing(srcIdx) {
         const src = node._boxes[srcIdx];
-        if (!src) return;
+        if (!src || src.group) return;                       // groups aren't duplicated (they'd orphan)
         const nb = JSON.parse(JSON.stringify(src));
         delete nb.nobbox; delete nb.locked; delete nb.id; delete nb.parent;  // a duplicate is editable, not born locked, fresh id, root
         node._boxes.push(nb);
@@ -2647,6 +2649,29 @@ app.registerExtension({
           panel.appendChild(p);
           return;
         }
+        if (b.group) {                                       // groups: name + frame color only (editor-only, never exported)
+          hint.textContent = "";
+          const gt = document.createElement("b");
+          gt.style.color = (b.palette || []).find(Boolean) || "#46b4e6";
+          gt.textContent = "📁 " + (b.name || "Group");
+          hint.appendChild(gt);
+          const note = document.createElement("div");
+          note.style.color = "#888"; note.textContent = "Group (organizer) — not exported. Move it to move its members.";
+          panel.appendChild(note);
+          const nameRow = document.createElement("div"); nameRow.className = "ai2go-ideo-row";
+          const nl = document.createElement("span"); nl.textContent = "name:"; nameRow.appendChild(nl);
+          const ni = document.createElement("input"); ni.type = "text"; ni.className = "ai2go-ideo-bbox"; ni.style.flex = "1 1 auto"; ni.value = b.name || "Group";
+          stopProp(ni);
+          ni.addEventListener("input", () => { b.name = ni.value; touch(); });
+          ni.addEventListener("keydown", (ev) => { ev.stopPropagation(); if (ev.key === "Enter") ni.blur(); });
+          nameRow.appendChild(ni); panel.appendChild(nameRow);
+          const palRow = document.createElement("div"); palRow.className = "ai2go-ideo-row";
+          const pl2 = document.createElement("span"); pl2.textContent = "frame:"; palRow.appendChild(pl2);
+          b.palette = b.palette || [];
+          buildSwatchRow(palRow, b.palette, 1, swatchEdit, commit);
+          panel.appendChild(palRow);
+          return;
+        }
         const col = (b.palette || []).find(Boolean) || "#bbb";
         const selN = node._selection.size;
         // Build with DOM + style.color (a CSS value) — never innerHTML — since col comes from
@@ -2753,6 +2778,7 @@ app.registerExtension({
           const dup = document.createElement("button");
           dup.className = "ai2go-ideo-lbtn"; dup.textContent = "⧉";
           dup.title = "Duplicate, then click on the canvas to place";
+          if (b.group) dup.style.display = "none";           // groups aren't duplicated
           const del = document.createElement("button");
           del.className = "ai2go-ideo-lbtn del"; del.textContent = "✕";
           del.title = b.locked ? "Unlock to delete" : "Delete region (children promote to its parent)";
@@ -2815,12 +2841,18 @@ app.registerExtension({
             if (idx < 0) return;
             removeBox(idx); commit(); fitCanvas();
           });
-          // Drag a row to RE-PARENT it: drop ONTO another row → become its child; drop on the "Overview"
-          // header → back to root. Cycle-guarded (can't drop onto self or a descendant).
+          // Drag a row to RE-PARENT: drop ONTO another row → become its child; drop on the "Overview"
+          // header → back to root. If the dragged row is part of a multi-selection, the WHOLE selection is
+          // reparented (so you can add many regions to a group at once); only its top-level boxes move, so
+          // any nesting inside the selection is preserved. Cycle-guarded (can't drop onto a dragged box or
+          // a descendant of one).
           row.addEventListener("pointerdown", (e) => {
             if (e.button !== 0 || e.target === lock || e.target === dup || e.target === del || e.target === tri) return;
             e.preventDefault(); e.stopPropagation();
             const sx = e.clientX, sy = e.clientY;
+            const myIdx = node._boxes.indexOf(b);
+            const draggedIds = (node._selection.has(myIdx) ? [...node._selection].map((i) => node._boxes[i]?.id) : [b.id]).filter(Boolean);
+            const draggedSet = new Set(draggedIds);
             let dragging = false, targetRow = null, toRoot = false;
             const clearCue = () => {
               for (const r of exList.querySelectorAll(".ai2go-ideo-lrow.drop-into")) r.classList.remove("drop-into");
@@ -2837,11 +2869,11 @@ app.registerExtension({
                 toRoot = true; exHead.classList.add("drop-root"); return;       // header zone → unparent
               }
               for (const other of exList.querySelectorAll(".ai2go-ideo-lrow")) {
-                if (other === row) continue;
+                const tb = other._box;
+                if (!tb || draggedSet.has(tb.id)) continue;                    // can't drop onto a dragged row
                 const r = other.getBoundingClientRect();
                 if (me.clientY >= r.top && me.clientY <= r.bottom) {
-                  const tb = other._box;
-                  if (tb && tb.id !== b.id && tb.id !== (b.parent ?? null) && !isAncestor(b.id, tb.id)) { targetRow = other; other.classList.add("drop-into"); }
+                  if (!draggedIds.some((did) => isAncestor(did, tb.id))) { targetRow = other; other.classList.add("drop-into"); }  // no cycles
                   break;
                 }
               }
@@ -2859,10 +2891,19 @@ app.registerExtension({
               row.classList.remove("dragging");
               // commit() below rebuilds the tree (destroying this row), so suppress the trailing click.
               node._exSuppressClick = true; setTimeout(() => { node._exSuppressClick = false; }, 0);
+              const targetId = toRoot ? null : (targetRow ? targetRow._box.id : undefined);
+              if (targetId === undefined) return;                              // dropped on nothing
+              // Reparent only the top-level dragged boxes (those whose parent isn't itself dragged).
               let changed = false;
-              if (toRoot) changed = setParent(b.id, null);
-              else if (targetRow) changed = setParent(b.id, targetRow._box.id);
-              if (changed) { selectOnly(node._boxes.indexOf(b)); commit(); }
+              for (const did of draggedIds) {
+                const bx = boxById(did);
+                if (bx && !(bx.parent != null && draggedSet.has(bx.parent))) { if (setParent(did, targetId)) changed = true; }
+              }
+              if (changed) {                                                   // keep the moved boxes selected
+                node._selection = new Set(draggedIds.map((id) => node._boxes.findIndex((x) => x.id === id)).filter((i) => i >= 0));
+                node._activeIdx = node._boxes.findIndex((x) => x.id === b.id);
+                commit();
+              }
             };
             document.addEventListener("pointermove", move);
             document.addEventListener("pointerup", up);
