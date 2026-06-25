@@ -2,6 +2,10 @@
 
 ComfyUI nodepack by AIKnowledge2Go
 
+> ℹ️ **Published for reference.** Issues are disabled and pull requests are closed automatically —
+> this repo doesn't accept contributions, and no support is provided. You're welcome to fork and
+> adapt it under the GPL-3.0 license.
+
 ## Contact
 
 - **YouTube:** [@AIKnowledge2Go](https://www.youtube.com/@AIKnowledge2Go)

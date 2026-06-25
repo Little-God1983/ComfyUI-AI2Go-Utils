@@ -1,0 +1,33 @@
+name: Auto-close pull requests
+
+# This repository is published for reference only and does not accept contributions.
+# Any pull request is closed automatically with a polite note. Runs via pull_request_target
+# (base-repo token, write access) and does NOT check out the PR code, so it's safe for fork PRs.
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  close:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const n = context.payload.pull_request.number;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: n,
+              body: "Thanks for your interest! 🙏 This repository is published for reference only — it doesn't accept contributions and no support is provided, so this pull request is being closed automatically. You're very welcome to fork and adapt it under the GPL-3.0 license.",
+            });
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: n,
+              state: "closed",
+            });
