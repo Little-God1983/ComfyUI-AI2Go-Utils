@@ -430,6 +430,8 @@ function injectStyle() {
     .ai2go-ideo-exptri:hover { color:#fff; }
     .ai2go-ideo-exptri.leaf { cursor:default; color:#444; }
     .ai2go-ideo-lrow.drop-into { box-shadow:inset 0 0 0 2px #46b4e6; background:#2a3a42; }
+    .ai2go-ideo-lrow.disabled .ai2go-ideo-ltext, .ai2go-ideo-lrow.disabled .ai2go-ideo-lnum, .ai2go-ideo-lrow.disabled .ai2go-ideo-lsw { opacity:0.4; }
+    .ai2go-ideo-en { flex:0 0 auto; margin:0 1px 0 0; cursor:pointer; }
     .ai2go-ideo-exhead.drop-root { box-shadow:inset 0 0 0 2px #46b4e6; }
   `;
   document.head.appendChild(s);
@@ -1198,7 +1200,7 @@ app.registerExtension({
         const res = [];
         for (let i = 0; i < node._boxes.length; i++) {
           const b = node._boxes[i];
-          if (b.locked || (b.group && node.properties.showGroups !== true)) continue;   // locked, or a hidden group, isn't grabbable
+          if (b.locked || isDisabled(b) || (b.group && node.properties.showGroups !== true)) continue;   // locked, disabled, or a hidden group isn't grabbable
           const rx = Math.min(baseRx, b.w / 3), ry = Math.min(baseRy, b.h / 3);  // shrink handles on small boxes so a central move zone remains
           const mode = rectHitTestN(mN.x, mN.y, b.x, b.y, b.x + b.w, b.y + b.h, rx, ry);
           if (mode) res.push({ index: i, mode });
@@ -1462,6 +1464,7 @@ app.registerExtension({
         const textB = textBlocks();                           // collision-avoided in-box text positions
         for (const i of order) {
           const b = node._boxes[i], active = i === aIdx, selected = selSet.has(i) && !b.locked;  // locked never shows as selected
+          if (isDisabled(b)) continue;                       // disabled (or under a disabled group) → not drawn
           const pal = (b.palette || []).filter(Boolean);
           const col = pal.length ? pal[0] : "#8c8c8c";       // box color = first palette color, else neutral grey
           const { x1, y1, x2, y2 } = toPx(b);
@@ -1591,6 +1594,13 @@ app.registerExtension({
           if (cur.parent === ancId) return true;
           cur = boxById(cur.parent);
         }
+        return false;
+      }
+      // A box is effectively disabled if it OR any ancestor has `disabled` (disabling a group disables all
+      // its members). Effectively-disabled boxes are hidden on the canvas AND excluded from the prompt.
+      function isDisabled(b) {
+        let cur = b, guard = 0;
+        while (cur && guard++ < 1000) { if (cur.disabled) return true; cur = cur.parent != null ? boxById(cur.parent) : null; }
         return false;
       }
       // All descendant ids of `id` (excludes id itself).
@@ -2377,7 +2387,7 @@ app.registerExtension({
           if (pal.length) sd.color_palette = pal;
           cap.style_description = sd;
         }
-        const elements = node._boxes.filter((b) => !b.group).map((b) => {   // groups are editor-only, never exported
+        const elements = node._boxes.filter((b) => !b.group && !isDisabled(b)).map((b) => {   // skip groups (editor-only) + disabled regions
           const etype = b.type === "text" ? "text" : "obj";
           const el = { type: etype };
           if (!b.nobbox) el.bbox = captionBboxJS(b);         // unplaced elements omit bbox
@@ -2838,9 +2848,15 @@ app.registerExtension({
           const hasKids = kids.has(b.id);
           const row = document.createElement("div");
           // active row solid; other selected rows also get the .active ring
-          row.className = "ai2go-ideo-lrow" + ((i === node._activeIdx || node._selection.has(i)) ? " active" : "");
+          row.className = "ai2go-ideo-lrow" + ((i === node._activeIdx || node._selection.has(i)) ? " active" : "") + (isDisabled(b) ? " disabled" : "");
           row.style.paddingLeft = (4 + depth * 13) + "px";    // indentation = tree depth
           row._box = b;
+          const enableChk = document.createElement("input");  // enable/disable toggle (cascades to children for a group)
+          enableChk.type = "checkbox"; enableChk.className = "ai2go-ideo-en"; enableChk.checked = !b.disabled;
+          enableChk.title = b.disabled ? "Disabled — click to enable"
+            : "Enabled — click to disable (hides it" + (b.group ? " and its members" : "") + " from the canvas and the prompt)";
+          stopProp(enableChk);
+          enableChk.addEventListener("change", (e) => { e.stopPropagation(); b.disabled = !enableChk.checked; commit(); });
           const tri = document.createElement("span");
           tri.className = "ai2go-ideo-exptri" + (hasKids ? "" : " leaf");
           tri.textContent = hasKids ? (b.collapsed ? "▶" : "▼") : "•";
@@ -2867,7 +2883,7 @@ app.registerExtension({
           del.className = "ai2go-ideo-lbtn del"; del.textContent = "✕";
           del.title = b.locked ? "Unlock to delete" : "Delete region (children promote to its parent)";
           del.disabled = !!b.locked;
-          row.append(tri, sw, num, txt, lock, dup, del);
+          row.append(tri, enableChk, sw, num, txt, lock, dup, del);
           exList.appendChild(row);
 
           if (hasKids) tri.addEventListener("click", (e) => {
@@ -2931,7 +2947,7 @@ app.registerExtension({
           // any nesting inside the selection is preserved. Cycle-guarded (can't drop onto a dragged box or
           // a descendant of one).
           row.addEventListener("pointerdown", (e) => {
-            if (e.button !== 0 || e.target === lock || e.target === dup || e.target === del || e.target === tri || b.locked) return;  // locked = frozen, no reparent
+            if (e.button !== 0 || e.target === lock || e.target === dup || e.target === del || e.target === tri || e.target === enableChk || b.locked) return;  // locked = frozen, no reparent
             e.preventDefault(); e.stopPropagation();
             const sx = e.clientX, sy = e.clientY;
             const myIdx = node._boxes.indexOf(b);

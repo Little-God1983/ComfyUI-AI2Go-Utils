@@ -65,6 +65,22 @@ def _wrap(draw, text, font, max_w):
     return lines
 
 
+def _by_id(boxes):
+    return {b.get("id"): b for b in boxes if isinstance(b, dict) and b.get("id")}
+
+
+def _eff_disabled(box, by_id):
+    # True if the box or any ancestor has "disabled" — disabling a group disables its members.
+    cur, seen = box, 0
+    while isinstance(cur, dict) and seen < 1000:
+        if cur.get("disabled"):
+            return True
+        p = cur.get("parent")
+        cur = by_id.get(p) if p is not None else None
+        seen += 1
+    return False
+
+
 def _render_preview(boxes, width, height, bg=None, brightness=50):
     # Render the regions + prompts over the reference image (or a black canvas).
     if bg is not None:
@@ -89,9 +105,10 @@ def _render_preview(boxes, width, height, bg=None, brightness=50):
     tag_font = _font(max(9, fs - 2))
     lh = fs + 2
 
+    by_id = _by_id(boxes)
     for i, box in enumerate(boxes):
-        if not isinstance(box, dict) or box.get("nobbox") or box.get("group"):
-            continue                                        # skip unplaced elements + editor-only groups
+        if not isinstance(box, dict) or box.get("nobbox") or box.get("group") or _eff_disabled(box, by_id):
+            continue                                        # skip unplaced elements, editor-only groups, and disabled
         palette = [c for c in (box.get("palette") or []) if c]
         r, g, b = _hex_rgb(palette[0]) if palette else (140, 140, 140)   # box = first palette color, else grey
         x1 = max(0, min(rw, round(box.get("x", 0) * rw)))
@@ -395,8 +412,9 @@ Toolbar:
                 caption["style_description"] = sd
 
             elements = []
+            by_id = _by_id(boxes)
             for box in boxes:
-                if not isinstance(box, dict) or box.get("group"):    # groups are editor-only organizers, never exported
+                if not isinstance(box, dict) or box.get("group") or _eff_disabled(box, by_id):    # skip groups + disabled
                     continue
                 etype = "text" if box.get("type") == "text" else "obj"
                 elem = {"type": etype}                      # key order matters
@@ -424,8 +442,9 @@ Toolbar:
 
         # Pixel-space bboxes ({x, y, width, height}) for SAM3 / BoundingBox consumers.
         bbox_dicts = []
+        bbox_by_id = _by_id(boxes)
         for box in boxes:
-            if not isinstance(box, dict) or box.get("nobbox") or box.get("group"):
+            if not isinstance(box, dict) or box.get("nobbox") or box.get("group") or _eff_disabled(box, bbox_by_id):
                 continue
             x, y = box.get("x", 0.0), box.get("y", 0.0)
             bw, bh = box.get("w", 0.0), box.get("h", 0.0)
