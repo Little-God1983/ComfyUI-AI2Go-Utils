@@ -765,15 +765,15 @@ app.registerExtension({
       });
       // Toggle on-canvas visibility of group frames (the Overview tree always shows them).
       const groupsBtn = document.createElement("button");
-      groupsBtn.className = "ai2go-ideo-btn"; groupsBtn.textContent = "📁";
+      groupsBtn.className = "ai2go-ideo-btn"; groupsBtn.textContent = "👁️";
       stopProp(groupsBtn);
       function syncGroupsBtn() {
-        const off = node.properties.showGroups === false;
-        groupsBtn.classList.toggle("active", off);
-        groupsBtn.title = off ? "Group frames hidden on the canvas — click to show (they're still in the Overview)"
-                              : "Hide group frames on the canvas (they stay in the Overview)";
+        const shown = node.properties.showGroups === true;     // hidden by default; only `true` shows the frames
+        groupsBtn.classList.toggle("active", shown);
+        groupsBtn.title = shown ? "Group frames visible on the canvas — click to hide (they stay in the Overview)"
+                                : "Group frames hidden on the canvas — click to show (they're in the Overview)";
       }
-      groupsBtn.addEventListener("click", () => { node.properties.showGroups = (node.properties.showGroups === false); syncGroupsBtn(); drawCanvas(); flushChange(); });
+      groupsBtn.addEventListener("click", () => { node.properties.showGroups = (node.properties.showGroups !== true); syncGroupsBtn(); drawCanvas(); flushChange(); });
       syncGroupsBtn();
       bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(outBtn); bar.appendChild(bgBtn); bar.appendChild(txtBtn); bar.appendChild(groupsBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(clearBtn);
       updateGrabBtn();
@@ -1198,7 +1198,7 @@ app.registerExtension({
         const res = [];
         for (let i = 0; i < node._boxes.length; i++) {
           const b = node._boxes[i];
-          if (b.locked || (b.group && node.properties.showGroups === false)) continue;   // locked, or a hidden group, isn't grabbable
+          if (b.locked || (b.group && node.properties.showGroups !== true)) continue;   // locked, or a hidden group, isn't grabbable
           const rx = Math.min(baseRx, b.w / 3), ry = Math.min(baseRy, b.h / 3);  // shrink handles on small boxes so a central move zone remains
           const mode = rectHitTestN(mN.x, mN.y, b.x, b.y, b.x + b.w, b.y + b.h, rx, ry);
           if (mode) res.push({ index: i, mode });
@@ -1468,7 +1468,7 @@ app.registerExtension({
           const w = x2 - x1, h = y2 - y1;
           const hovered = (i === node._hoverBox && !b.locked) || selected;  // locked boxes don't hover; selected stay highlighted
           if (b.group) {                                     // group container: dashed frame + name; no palette strip / desc / number
-            if (node.properties.showGroups === false) continue;   // group visibility toggled off (still shown in the Overview)
+            if (node.properties.showGroups !== true) continue;   // groups hidden by default on the canvas (still shown in the Overview)
             const gcol = pal.length ? pal[0] : "#46b4e6";
             if (selected) { ctx.fillStyle = "rgba(26,26,26,0.55)"; ctx.fillRect(x1, y1, w, h); }
             ctx.save();
