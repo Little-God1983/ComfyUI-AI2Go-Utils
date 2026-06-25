@@ -2847,11 +2847,11 @@ app.registerExtension({
           // any nesting inside the selection is preserved. Cycle-guarded (can't drop onto a dragged box or
           // a descendant of one).
           row.addEventListener("pointerdown", (e) => {
-            if (e.button !== 0 || e.target === lock || e.target === dup || e.target === del || e.target === tri) return;
+            if (e.button !== 0 || e.target === lock || e.target === dup || e.target === del || e.target === tri || b.locked) return;  // locked = frozen, no reparent
             e.preventDefault(); e.stopPropagation();
             const sx = e.clientX, sy = e.clientY;
             const myIdx = node._boxes.indexOf(b);
-            const draggedIds = (node._selection.has(myIdx) ? [...node._selection].map((i) => node._boxes[i]?.id) : [b.id]).filter(Boolean);
+            const draggedIds = (node._selection.has(myIdx) ? [...node._selection].map((i) => node._boxes[i]?.id) : [b.id]).filter((id) => { const bx = boxById(id); return bx && !bx.locked; });  // never reparent locked boxes
             const draggedSet = new Set(draggedIds);
             let dragging = false, targetRow = null, toRoot = false;
             const clearCue = () => {
@@ -2873,7 +2873,8 @@ app.registerExtension({
                 if (!tb || draggedSet.has(tb.id)) continue;                    // can't drop onto a dragged row
                 const r = other.getBoundingClientRect();
                 if (me.clientY >= r.top && me.clientY <= r.bottom) {
-                  if (!draggedIds.some((did) => isAncestor(did, tb.id))) { targetRow = other; other.classList.add("drop-into"); }  // no cycles
+                  const wouldMove = draggedIds.some((did) => { const bx = boxById(did); return bx && !(bx.parent != null && draggedSet.has(bx.parent)) && (bx.parent ?? null) !== tb.id; });
+                  if (wouldMove && !draggedIds.some((did) => isAncestor(did, tb.id))) { targetRow = other; other.classList.add("drop-into"); }  // cue only when it changes something; no cycles
                   break;
                 }
               }
@@ -2890,18 +2891,19 @@ app.registerExtension({
               if (!dragging) return;
               row.classList.remove("dragging");
               // commit() below rebuilds the tree (destroying this row), so suppress the trailing click.
-              node._exSuppressClick = true; setTimeout(() => { node._exSuppressClick = false; }, 0);
               const targetId = toRoot ? null : (targetRow ? targetRow._box.id : undefined);
-              if (targetId === undefined) return;                              // dropped on nothing
+              if (targetId === undefined) return;                              // dropped on nothing → let the click through
               // Reparent only the top-level dragged boxes (those whose parent isn't itself dragged).
               let changed = false;
               for (const did of draggedIds) {
                 const bx = boxById(did);
                 if (bx && !(bx.parent != null && draggedSet.has(bx.parent))) { if (setParent(did, targetId)) changed = true; }
               }
-              if (changed) {                                                   // keep the moved boxes selected
+              if (changed) {                                                   // commit() rebuilds the tree → suppress the trailing click
+                node._exSuppressClick = true; setTimeout(() => { node._exSuppressClick = false; }, 0);
                 node._selection = new Set(draggedIds.map((id) => node._boxes.findIndex((x) => x.id === id)).filter((i) => i >= 0));
                 node._activeIdx = node._boxes.findIndex((x) => x.id === b.id);
+                node._selAnchor = node._activeIdx;                             // keep the Shift-range anchor consistent
                 commit();
               }
             };
