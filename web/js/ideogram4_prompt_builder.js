@@ -414,6 +414,7 @@ function injectStyle() {
     .ai2go-ideo-bglbl { color:#888; font:11px sans-serif; flex:0 0 auto; min-width:62px; }
     .ai2go-ideo-trow { padding:2px 4px; border-radius:4px; }
     .ai2go-ideo-trow:hover { background:#333; }
+    .ai2go-ideo-dragpill { position:fixed; z-index:11000; pointer-events:none; background:#2a3a42; color:#cfe8f5; border:1px solid #46b4e6; border-radius:5px; padding:2px 8px; font:11px sans-serif; box-shadow:0 4px 14px rgba(0,0,0,0.5); white-space:nowrap; }
     .ai2go-ideo-cvrow { display:flex; flex:1 1 auto; min-height:60px; gap:4px; overflow:hidden; }
     .ai2go-ideo-explorer { flex:0 0 auto; display:flex; flex-direction:column; background:#202020; border:1px solid #333; border-radius:4px; overflow:hidden; min-width:0; }
     .ai2go-ideo-explorer.collapsed { width:26px !important; }
@@ -762,7 +763,19 @@ app.registerExtension({
         tplMenu.style.top = Math.min(r.bottom + 4, window.innerHeight - tplMenu.offsetHeight - 4) + "px";
         tplDismiss.arm();
       });
-      bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(outBtn); bar.appendChild(bgBtn); bar.appendChild(txtBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(clearBtn);
+      // Toggle on-canvas visibility of group frames (the Overview tree always shows them).
+      const groupsBtn = document.createElement("button");
+      groupsBtn.className = "ai2go-ideo-btn"; groupsBtn.textContent = "📁";
+      stopProp(groupsBtn);
+      function syncGroupsBtn() {
+        const off = node.properties.showGroups === false;
+        groupsBtn.classList.toggle("active", off);
+        groupsBtn.title = off ? "Group frames hidden on the canvas — click to show (they're still in the Overview)"
+                              : "Hide group frames on the canvas (they stay in the Overview)";
+      }
+      groupsBtn.addEventListener("click", () => { node.properties.showGroups = (node.properties.showGroups === false); syncGroupsBtn(); drawCanvas(); flushChange(); });
+      syncGroupsBtn();
+      bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(outBtn); bar.appendChild(bgBtn); bar.appendChild(txtBtn); bar.appendChild(groupsBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(clearBtn);
       updateGrabBtn();
 
       // Persistent global style-palette row
@@ -1185,7 +1198,7 @@ app.registerExtension({
         const res = [];
         for (let i = 0; i < node._boxes.length; i++) {
           const b = node._boxes[i];
-          if (b.locked) continue;                          // locked regions aren't grabbable on the canvas
+          if (b.locked || (b.group && node.properties.showGroups === false)) continue;   // locked, or a hidden group, isn't grabbable
           const rx = Math.min(baseRx, b.w / 3), ry = Math.min(baseRy, b.h / 3);  // shrink handles on small boxes so a central move zone remains
           const mode = rectHitTestN(mN.x, mN.y, b.x, b.y, b.x + b.w, b.y + b.h, rx, ry);
           if (mode) res.push({ index: i, mode });
@@ -1455,6 +1468,7 @@ app.registerExtension({
           const w = x2 - x1, h = y2 - y1;
           const hovered = (i === node._hoverBox && !b.locked) || selected;  // locked boxes don't hover; selected stay highlighted
           if (b.group) {                                     // group container: dashed frame + name; no palette strip / desc / number
+            if (node.properties.showGroups === false) continue;   // group visibility toggled off (still shown in the Overview)
             const gcol = pal.length ? pal[0] : "#46b4e6";
             if (selected) { ctx.fillStyle = "rgba(26,26,26,0.55)"; ctx.fillRect(x1, y1, w, h); }
             ctx.save();
@@ -2853,7 +2867,7 @@ app.registerExtension({
             const myIdx = node._boxes.indexOf(b);
             const draggedIds = (node._selection.has(myIdx) ? [...node._selection].map((i) => node._boxes[i]?.id) : [b.id]).filter((id) => { const bx = boxById(id); return bx && !bx.locked; });  // never reparent locked boxes
             const draggedSet = new Set(draggedIds);
-            let dragging = false, targetRow = null, toRoot = false;
+            let dragging = false, targetRow = null, toRoot = false, pill = null;
             const clearCue = () => {
               for (const r of exList.querySelectorAll(".ai2go-ideo-lrow.drop-into")) r.classList.remove("drop-into");
               exHead.classList.remove("drop-root");
@@ -2861,7 +2875,9 @@ app.registerExtension({
             const move = (me) => {
               if (!dragging) {
                 if (Math.abs(me.clientX - sx) + Math.abs(me.clientY - sy) < 4) return;
-                dragging = true; row.classList.add("dragging"); document.body.classList.add("ai2go-ideo-dragging");
+                dragging = true; document.body.classList.add("ai2go-ideo-dragging");
+                for (const r of exList.querySelectorAll(".ai2go-ideo-lrow")) if (draggedSet.has(r._box?.id)) r.classList.add("dragging");  // fade the whole dragged set
+                pill = document.createElement("div"); pill.className = "ai2go-ideo-dragpill"; document.body.appendChild(pill);  // cursor-following drag label
               }
               clearCue(); targetRow = null; toRoot = false;
               const hr = exHead.getBoundingClientRect();
@@ -2878,12 +2894,20 @@ app.registerExtension({
                   break;
                 }
               }
+              if (pill) {                                                      // live drag label following the cursor
+                pill.style.left = (me.clientX + 14) + "px"; pill.style.top = (me.clientY + 16) + "px";
+                const what = draggedIds.length > 1 ? draggedIds.length + " regions" : "1 region";
+                const dest = toRoot ? " → root" : (targetRow ? " → " + (targetRow._box.group ? ("📁 " + (targetRow._box.name || "Group")) : (rowLabel(targetRow._box) || "region")) : "");
+                pill.textContent = what + dest;
+              }
             };
             const cleanup = () => {
               document.removeEventListener("pointermove", move);
               document.removeEventListener("pointerup", up);
               document.removeEventListener("pointercancel", up);
               document.body.classList.remove("ai2go-ideo-dragging");
+              for (const r of exList.querySelectorAll(".ai2go-ideo-lrow.dragging")) r.classList.remove("dragging");  // clear the dragged-set fade
+              if (pill) { pill.remove(); pill = null; }
               node._exDragCleanup = null;
             };
             const up = () => {
@@ -3106,6 +3130,7 @@ app.registerExtension({
         guideColor.value = node.properties.guideColor || "#ffffff";
         opacitySlider.value = node.properties.guideOpacity == null ? 100 : node.properties.guideOpacity;
         showLbl._cb.checked = node.properties.showBoxText !== false;
+        syncGroupsBtn();
         strokeLbl._cb.checked = node.properties.textStroke !== false;
         autoLbl._cb.checked = node.properties.textAutoPlace !== false;
         sizeSlider.value = node.properties.textSize || 12;
