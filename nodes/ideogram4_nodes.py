@@ -371,7 +371,7 @@ Toolbar:
         used_import = imported is not None and (import_mode == "always" or not boxes)
 
         if used_import:
-            caption = imported
+            caption = {k: v for k, v in imported.items() if k != "_ai2go"}   # strip the editor-only sidecar from the prompt output
             boxes = _caption_to_boxes(imported)
         else:
             caption = {}
