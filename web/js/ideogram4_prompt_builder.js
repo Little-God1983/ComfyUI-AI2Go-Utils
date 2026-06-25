@@ -809,6 +809,7 @@ app.registerExtension({
       const exList = document.createElement("div");
       exList.className = "ai2go-ideo-exlist";
       stopProp(exList);
+      exList.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); openOverviewMenu(e.clientX, e.clientY); });
       function applyExplorerCollapsed(on) {
         node.properties.explorerCollapsed = !!on;
         explorerEl.classList.toggle("collapsed", !!on);
@@ -1452,6 +1453,31 @@ app.registerExtension({
           const { x1, y1, x2, y2 } = toPx(b);
           const w = x2 - x1, h = y2 - y1;
           const hovered = (i === node._hoverBox && !b.locked) || selected;  // locked boxes don't hover; selected stay highlighted
+          if (b.group) {                                     // group container: dashed frame + name; no palette strip / desc / number
+            const gcol = pal.length ? pal[0] : "#46b4e6";
+            if (selected) { ctx.fillStyle = "rgba(26,26,26,0.55)"; ctx.fillRect(x1, y1, w, h); }
+            ctx.save();
+            ctx.setLineDash([8, 5]);
+            ctx.strokeStyle = gcol; ctx.lineWidth = selected ? 2 : (hovered ? 1.5 : 1);
+            ctx.strokeRect(x1 + 1, y1 + 1, w - 2, h - 2);
+            ctx.setLineDash([]);
+            ctx.font = "bold 11px sans-serif";
+            const nm = "📁 " + (b.name || "Group");
+            const tw = Math.min(ctx.measureText(nm).width + 8, Math.max(8, w));
+            ctx.fillStyle = gcol; ctx.fillRect(x1, y1, tw, 14);
+            ctx.save(); ctx.beginPath(); ctx.rect(x1, y1, w, 14); ctx.clip();
+            ctx.fillStyle = textOn(gcol); ctx.fillText(nm, x1 + 4, y1 + 11);
+            ctx.restore();
+            if (selected) {                                  // orange selection ring (solid = active, dashed = also-selected)
+              const olw = active ? 2 : 1;
+              ctx.strokeStyle = "#ff8c00"; ctx.lineWidth = olw;
+              if (!active) ctx.setLineDash([5, 3]);
+              ctx.strokeRect(x1 + olw / 2, y1 + olw / 2, w - olw, h - olw);
+              ctx.setLineDash([]);
+            }
+            ctx.restore();
+            continue;
+          }
           if (selected) {                                    // opaque backing so contents read clearly over boxes behind
             ctx.fillStyle = "rgba(26,26,26,0.88)";
             ctx.fillRect(x1, y1, w, h);
@@ -1638,6 +1664,53 @@ app.registerExtension({
       function selectOnly(idx) {
         node._activeIdx = idx;
         node._selection = idx >= 0 ? new Set([idx]) : new Set();
+      }
+      // Group the current selection under a new named "group" box. Groups are EDITOR-ONLY (never exported);
+      // they parent the selection so moving the group moves the whole set. Children keep their own internal
+      // hierarchy — only the top-level selected boxes are reparented to the group. The group's bbox is the
+      // selection's union plus a small margin (so its dashed frame is grabbable on the canvas to move it).
+      function createGroupFromSelection() {
+        const idxs = [...node._selection].filter((i) => node._boxes[i]);
+        if (!idxs.length) return;
+        const name = (window.prompt("Group name:", "Group") || "").trim() || "Group";
+        let minx = 1, miny = 1, maxx = 0, maxy = 0, any = false;
+        for (const i of idxs) { const b = node._boxes[i]; if (b.nobbox) continue; minx = Math.min(minx, b.x); miny = Math.min(miny, b.y); maxx = Math.max(maxx, b.x + b.w); maxy = Math.max(maxy, b.y + b.h); any = true; }
+        if (!any) { minx = 0.05; miny = 0.05; maxx = 0.45; maxy = 0.35; }
+        const pad = 0.015;
+        minx = clamp01(minx - pad); miny = clamp01(miny - pad); maxx = clamp01(maxx + pad); maxy = clamp01(maxy + pad);
+        const parents = new Set(idxs.map((i) => node._boxes[i].parent ?? null));
+        const groupParent = parents.size === 1 ? [...parents][0] : null;   // sits where the selection lived, else root
+        const group = { id: makeUUID(), group: true, name, type: "obj", text: "", desc: "", palette: [],
+          x: minx, y: miny, w: Math.max(0, maxx - minx), h: Math.max(0, maxy - miny), parent: groupParent };
+        node._boxes.push(group);                              // appended → drawn behind its children (a container)
+        const selIds = new Set(idxs.map((i) => node._boxes[i].id));
+        for (const i of idxs) { const b = node._boxes[i]; if (!(b.parent != null && selIds.has(b.parent))) b.parent = group.id; }  // reparent only the top-level of the selection
+        selectOnly(node._boxes.indexOf(group));
+        commit(); fitCanvas();
+      }
+      // Right-click menu for the Overview (one item for now: group the selection).
+      function closeOverviewMenu() {
+        if (node._ovMenu) { node._ovMenu.remove(); node._ovMenu = null; }
+        node._ovDismiss?.disarm(); node._ovDismiss = null;
+      }
+      function openOverviewMenu(clientX, clientY) {
+        closeOverviewMenu();
+        const menu = document.createElement("div");
+        menu.className = "ai2go-ideo-menu";
+        const n = node._selection.size;
+        const item = document.createElement("div");
+        item.className = "ai2go-ideo-trow"; item.style.cssText = "padding:5px 10px;cursor:" + (n ? "pointer" : "default") + ";";
+        item.textContent = n ? `Create group from selection (${n})` : "Select regions first to group them";
+        if (!n) item.style.opacity = "0.5";
+        else item.addEventListener("click", () => { closeOverviewMenu(); createGroupFromSelection(); });
+        menu.appendChild(item);
+        document.body.appendChild(menu);
+        node._ovMenu = menu;
+        const r = menu.getBoundingClientRect();
+        menu.style.left = Math.max(4, Math.min(clientX, window.innerWidth - r.width - 4)) + "px";
+        menu.style.top = Math.max(4, Math.min(clientY, window.innerHeight - r.height - 4)) + "px";
+        node._ovDismiss = outsideDismiss(menu, () => closeOverviewMenu());
+        node._ovDismiss.arm();
       }
 
       // ── pointer interaction ──
@@ -2020,6 +2093,7 @@ app.registerExtension({
         node._layerDismiss?.disarm(); node._layerDismiss = null;
       }
       function rowLabel(b) {
+        if (b.group) return "📁 " + (b.name || "Group");
         if (b.type === "text") {
           const t = b.text ? `"${b.text}"` : "";
           return b.desc ? (t ? t + " — " + b.desc : b.desc) : t;
@@ -2242,7 +2316,7 @@ app.registerExtension({
           if (pal.length) sd.color_palette = pal;
           cap.style_description = sd;
         }
-        const elements = node._boxes.map((b) => {
+        const elements = node._boxes.filter((b) => !b.group).map((b) => {   // groups are editor-only, never exported
           const etype = b.type === "text" ? "text" : "obj";
           const el = { type: etype };
           if (!b.nobbox) el.bbox = captionBboxJS(b);         // unplaced elements omit bbox
@@ -2728,6 +2802,12 @@ app.registerExtension({
             }
             commit();
           });
+          row.addEventListener("dblclick", (e) => {           // rename a group by double-clicking its row
+            e.stopPropagation();
+            if (!b.group) return;
+            const nm = (window.prompt("Group name:", b.name || "Group") || "").trim();
+            if (nm) { b.name = nm; commit(); }
+          });
           dup.addEventListener("click", (e) => { e.stopPropagation(); startPlacing(node._boxes.indexOf(b)); });
           del.addEventListener("click", (e) => {
             e.stopPropagation();
@@ -2896,6 +2976,7 @@ app.registerExtension({
         closeOutMenu(); node._outMenu?.remove();
         closeInlineEditor();
         closeLayersMenu();
+        closeOverviewMenu();
         for (const ro of node._areaObservers) ro.disconnect();
         node._areaObservers = [];
       });

@@ -90,8 +90,8 @@ def _render_preview(boxes, width, height, bg=None, brightness=50):
     lh = fs + 2
 
     for i, box in enumerate(boxes):
-        if not isinstance(box, dict) or box.get("nobbox"):
-            continue                                        # skip unplaced elements (no real location)
+        if not isinstance(box, dict) or box.get("nobbox") or box.get("group"):
+            continue                                        # skip unplaced elements + editor-only groups
         palette = [c for c in (box.get("palette") or []) if c]
         r, g, b = _hex_rgb(palette[0]) if palette else (140, 140, 140)   # box = first palette color, else grey
         x1 = max(0, min(rw, round(box.get("x", 0) * rw)))
@@ -396,7 +396,7 @@ Toolbar:
 
             elements = []
             for box in boxes:
-                if not isinstance(box, dict):
+                if not isinstance(box, dict) or box.get("group"):    # groups are editor-only organizers, never exported
                     continue
                 etype = "text" if box.get("type") == "text" else "obj"
                 elem = {"type": etype}                      # key order matters
@@ -425,7 +425,7 @@ Toolbar:
         # Pixel-space bboxes ({x, y, width, height}) for SAM3 / BoundingBox consumers.
         bbox_dicts = []
         for box in boxes:
-            if not isinstance(box, dict) or box.get("nobbox"):
+            if not isinstance(box, dict) or box.get("nobbox") or box.get("group"):
                 continue
             x, y = box.get("x", 0.0), box.get("y", 0.0)
             bw, bh = box.get("w", 0.0), box.get("h", 0.0)
