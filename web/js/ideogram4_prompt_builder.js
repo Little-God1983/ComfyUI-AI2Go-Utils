@@ -716,7 +716,7 @@ app.registerExtension({
           if (!name) return;
           const existing = await listTemplateNames();
           if (existing.includes(name) && !window.confirm(`Overwrite template "${name}"?`)) return;
-          if (await saveTemplate(name, buildCaption())) buildTplMenu();
+          if (await saveTemplate(name, buildClipboardCaption())) buildTplMenu();
         });
         saveRow.appendChild(saveBtn); tplMenu.appendChild(saveRow);
         const names = await listTemplateNames();
@@ -745,7 +745,7 @@ app.registerExtension({
           });
           upd.addEventListener("click", async (e) => {
             e.stopPropagation();
-            if (await saveTemplate(name, buildCaption())) buildTplMenu();
+            if (await saveTemplate(name, buildClipboardCaption())) buildTplMenu();
           });
           del.addEventListener("click", async (e) => {
             e.stopPropagation();
@@ -2364,7 +2364,7 @@ app.registerExtension({
         if (xmin > xmax) [xmin, xmax] = [xmax, xmin];
         return xy ? [xmin, ymin, xmax, ymax] : [ymin, xmin, ymax, xmax];
       }
-      function buildCaption() {
+      function buildCaptionObject() {
         const cap = {};
         if ((getW("high_level_description") || "").trim()) cap.high_level_description = getW("high_level_description");
         const styleW = findW("style");
@@ -2388,7 +2388,18 @@ app.registerExtension({
           return el;
         });
         cap.compositional_deconstruction = { background: getW("background"), elements };
-        return (formatWidget?.value) === "pretty" ? pyJson(cap) : JSON.stringify(cap);   // compact by default; matches the node output
+        return cap;
+      }
+      function stringifyCaption(cap) { return (formatWidget?.value) === "pretty" ? pyJson(cap) : JSON.stringify(cap); }  // compact by default; matches the node output
+      function buildCaption() { return stringifyCaption(buildCaptionObject()); }   // clean caption — token estimate + Python-matching
+      // Clipboard / template form: the clean caption PLUS an "_ai2go" sidecar carrying the full editor layout
+      // (groups + parent/id/name/etc). KJNodes and the model ignore the unknown key; OUR Paste reads it to
+      // restore the hierarchy losslessly. Added only when there's hierarchy/groups worth preserving, so plain
+      // scenes stay clean. The Python `prompt` output never includes it.
+      function buildClipboardCaption() {
+        const cap = buildCaptionObject();
+        if (node._boxes.some((b) => b.group || b.parent != null)) cap._ai2go = { v: 1, boxes: node._boxes };
+        return stringifyCaption(cap);
       }
       // Rough token estimate (~chars/4); exact count needs the Qwen tokenizer.
       function updateTokens() {
@@ -2398,7 +2409,7 @@ app.registerExtension({
         tokenSpan.style.color = n >= 2048 ? "#e05555" : n >= 1792 ? "#e6a23c" : n >= 256 ? "#6cc06c" : "#888";
       }
       async function doCopy() {
-        const txt = buildCaption();
+        const txt = buildClipboardCaption();   // includes the _ai2go layout sidecar when there are groups/parents
         try { await navigator.clipboard.writeText(txt); copyBtn.textContent = "Copied"; setTimeout(() => (copyBtn.textContent = "Copy"), 900); }
         catch (e) { window.prompt("Copy the caption JSON:", txt); }
       }
@@ -2430,7 +2441,12 @@ app.registerExtension({
       function applyCaption(cap) {
         const cd = (cap && cap.compositional_deconstruction) || {};
         const els = Array.isArray(cd.elements) ? cd.elements : [];
-        node._boxes = els.map((el, i) => bboxElemToBox(el, i)).filter(Boolean);
+        const side = cap && cap._ai2go;
+        if (side && Array.isArray(side.boxes) && side.boxes.some((b) => b && typeof b.x === "number")) {
+          node._boxes = side.boxes.filter((b) => b && typeof b.x === "number");   // AI2Go sidecar → full restore (groups + hierarchy)
+        } else {
+          node._boxes = els.map((el, i) => bboxElemToBox(el, i)).filter(Boolean);  // plain caption (KJ / Ideogram) → flat regions
+        }
         selectOnly(node._boxes.length ? 0 : -1);
         setWidgetVal("high_level_description", cap.high_level_description || "");
         setWidgetVal("background", cd.background || "");
