@@ -1715,12 +1715,17 @@ app.registerExtension({
           idMap.set(oldId, nid); c.id = nid; delete c.locked;   // the copy is editable
           clones.push(c);
         }
-        let dx = 0.03, dy = 0.03;                                // shift the copy, keeping it on-canvas + layout intact
-        if (g.x + g.w + dx > 1) dx = Math.max(0, 1 - g.x - g.w);
-        if (g.y + g.h + dy > 1) dy = Math.max(0, 1 - g.y - g.h);
-        for (const c of clones) {
-          c.parent = (c.parent != null && idMap.has(c.parent)) ? idMap.get(c.parent) : (g.parent ?? null);
-          if (!c.nobbox) { c.x = clamp01((c.x || 0) + dx); c.y = clamp01((c.y || 0) + dy); }
+        for (const c of clones) c.parent = (c.parent != null && idMap.has(c.parent)) ? idMap.get(c.parent) : (g.parent ?? null);
+        // Shift the whole copy by ONE uniform delta so its internal layout is preserved exactly. Bound the
+        // delta by the copy's ACTUAL extent (a member may protrude past the frame), and fall back to a
+        // negative shift when there's no room on the positive side. No per-clone clamp (it would distort).
+        const placed = clones.filter((c) => !c.nobbox);
+        if (placed.length) {
+          const maxR = Math.max(...placed.map((c) => c.x + c.w)), maxB = Math.max(...placed.map((c) => c.y + c.h));
+          const minL = Math.min(...placed.map((c) => c.x)), minT = Math.min(...placed.map((c) => c.y));
+          let dx = Math.min(0.03, Math.max(0, 1 - maxR)); if (dx === 0) dx = -Math.min(0.03, minL);
+          let dy = Math.min(0.03, Math.max(0, 1 - maxB)); if (dy === 0) dy = -Math.min(0.03, minT);
+          for (const c of placed) { c.x += dx; c.y += dy; }
         }
         node._boxes.push(...clones);
         selectOnly(node._boxes.findIndex((x) => x.id === idMap.get(groupId)));
@@ -1728,11 +1733,17 @@ app.registerExtension({
       }
       // Mirror a group's members horizontally ("h") or vertically ("v") about the group's frame (frame unchanged).
       function mirrorGroup(groupId, axis) {
-        const g = boxById(groupId); if (!g || !g.group) return;
-        for (const did of descendantIds(groupId)) {
-          const c = boxById(did); if (!c || c.locked || c.nobbox) continue;   // leave locked / unplaced members
-          if (axis === "h") c.x = clamp01(2 * g.x + g.w - c.x - c.w);
-          else c.y = clamp01(2 * g.y + g.h - c.y - c.h);
+        const g = boxById(groupId); if (!g || !g.group || (axis !== "h" && axis !== "v")) return;
+        // Collect members reachable WITHOUT crossing a locked box, so a nested sub-group frame and its
+        // children always mirror together (or are skipped together) — frames keep enclosing their kids.
+        const kmap = new Map();
+        for (const bb of node._boxes) if (bb.parent != null) { if (!kmap.has(bb.parent)) kmap.set(bb.parent, []); kmap.get(bb.parent).push(bb); }
+        const targets = [];
+        const collect = (pid) => { for (const ch of (kmap.get(pid) || [])) { if (ch.locked) continue; if (!ch.nobbox) targets.push(ch); collect(ch.id); } };
+        collect(groupId);
+        for (const c of targets) {                               // clamp the whole interval (keeps size, stays on-canvas)
+          if (axis === "h") c.x = Math.max(0, Math.min(2 * g.x + g.w - c.x - c.w, 1 - c.w));
+          else c.y = Math.max(0, Math.min(2 * g.y + g.h - c.y - c.h, 1 - c.h));
         }
         commit();
       }
