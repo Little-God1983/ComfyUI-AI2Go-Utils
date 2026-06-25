@@ -1704,6 +1704,38 @@ app.registerExtension({
         selectOnly(node._boxes.indexOf(group));
         commit(); fitCanvas();
       }
+      // Duplicate a group and its whole subtree (fresh ids, parents remapped within the copy, shifted so it's visible).
+      function duplicateGroup(groupId) {
+        const g = boxById(groupId); if (!g || !g.group) return;
+        const ids = [groupId, ...descendantIds(groupId)];
+        const idMap = new Map(), clones = [];
+        for (const oldId of ids) {
+          const src = boxById(oldId); if (!src) continue;
+          const c = JSON.parse(JSON.stringify(src)); const nid = makeUUID();
+          idMap.set(oldId, nid); c.id = nid; delete c.locked;   // the copy is editable
+          clones.push(c);
+        }
+        let dx = 0.03, dy = 0.03;                                // shift the copy, keeping it on-canvas + layout intact
+        if (g.x + g.w + dx > 1) dx = Math.max(0, 1 - g.x - g.w);
+        if (g.y + g.h + dy > 1) dy = Math.max(0, 1 - g.y - g.h);
+        for (const c of clones) {
+          c.parent = (c.parent != null && idMap.has(c.parent)) ? idMap.get(c.parent) : (g.parent ?? null);
+          if (!c.nobbox) { c.x = clamp01((c.x || 0) + dx); c.y = clamp01((c.y || 0) + dy); }
+        }
+        node._boxes.push(...clones);
+        selectOnly(node._boxes.findIndex((x) => x.id === idMap.get(groupId)));
+        commit(); fitCanvas();
+      }
+      // Mirror a group's members horizontally ("h") or vertically ("v") about the group's frame (frame unchanged).
+      function mirrorGroup(groupId, axis) {
+        const g = boxById(groupId); if (!g || !g.group) return;
+        for (const did of descendantIds(groupId)) {
+          const c = boxById(did); if (!c || c.locked || c.nobbox) continue;   // leave locked / unplaced members
+          if (axis === "h") c.x = clamp01(2 * g.x + g.w - c.x - c.w);
+          else c.y = clamp01(2 * g.y + g.h - c.y - c.h);
+        }
+        commit();
+      }
       // Right-click menu for the Overview (one item for now: group the selection).
       function closeOverviewMenu() {
         if (node._ovMenu) { node._ovMenu.remove(); node._ovMenu = null; }
@@ -2686,6 +2718,15 @@ app.registerExtension({
           b.palette = b.palette || [];
           buildSwatchRow(palRow, b.palette, 1, swatchEdit, commit);
           panel.appendChild(palRow);
+          const actRow = document.createElement("div"); actRow.className = "ai2go-ideo-row";
+          const dupBtn = document.createElement("button"); dupBtn.className = "ai2go-ideo-btn"; dupBtn.textContent = "Duplicate"; dupBtn.title = "Duplicate this group and all its members";
+          stopProp(dupBtn); dupBtn.addEventListener("click", () => duplicateGroup(b.id));
+          const mhBtn = document.createElement("button"); mhBtn.className = "ai2go-ideo-btn"; mhBtn.textContent = "Mirror ⇆"; mhBtn.title = "Flip the members left ↔ right within the group";
+          stopProp(mhBtn); mhBtn.addEventListener("click", () => mirrorGroup(b.id, "h"));
+          const mvBtn = document.createElement("button"); mvBtn.className = "ai2go-ideo-btn"; mvBtn.textContent = "Mirror ⇅"; mvBtn.title = "Flip the members top ↕ bottom within the group";
+          stopProp(mvBtn); mvBtn.addEventListener("click", () => mirrorGroup(b.id, "v"));
+          actRow.append(dupBtn, mhBtn, mvBtn);
+          panel.appendChild(actRow);
           return;
         }
         const col = (b.palette || []).find(Boolean) || "#bbb";
