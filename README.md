@@ -1,3 +1,5 @@
+![ComfyUI-AI2Go-Utils](assets/AI2Go-Banner.jpg)
+
 # ComfyUI-AI2Go-Utils
 
 ComfyUI nodepack by AIKnowledge2Go
@@ -36,6 +38,8 @@ scene-graph **Overview**, region **parenting**, and named **groups** layered on 
 
 **Outputs:** `prompt` (the caption JSON), `preview` (a rendered overlay image), `bboxes`
 (pixel-space boxes for SAM3 / crop nodes), `width`, `height`.
+
+![How it works](assets/How-It-Works.jpg)
 
 #### Region editor (canvas)
 
