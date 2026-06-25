@@ -804,7 +804,8 @@ app.registerExtension({
       stopProp(exToggle);
       const exTitle = document.createElement("span");
       exTitle.className = "ai2go-ideo-extitle";
-      exTitle.textContent = "Regions";
+      exTitle.textContent = "Overview";
+      exTitle.title = "Click a region to select · Ctrl/Cmd-click to multi-select · Shift-click for a range · drag a row onto another to nest";
       const exList = document.createElement("div");
       exList.className = "ai2go-ideo-exlist";
       stopProp(exList);
@@ -2700,10 +2701,31 @@ app.registerExtension({
             }
             commit();
           });
-          row.addEventListener("click", () => {
+          row.addEventListener("click", (ev) => {
             if (node._exSuppressClick) { node._exSuppressClick = false; return; }  // swallow the click that trails a reparent drag
             canvasEl.focus();                                // show the selection on canvas + route Del/Ctrl+C here
-            selectOnly(node._boxes.indexOf(b));
+            const idx = node._boxes.indexOf(b);
+            if (ev.shiftKey && node._selAnchor != null && node._selAnchor !== idx) {
+              // Shift = range-select from the anchor to here, in the CURRENT displayed (tree) order.
+              const order = Array.from(exList.querySelectorAll(".ai2go-ideo-lrow")).map((r) => node._boxes.indexOf(r._box));
+              const a = order.indexOf(node._selAnchor), c = order.indexOf(idx);
+              if (a >= 0 && c >= 0) {
+                const [lo, hi] = a < c ? [a, c] : [c, a];
+                node._selection = new Set(order.slice(lo, hi + 1).filter((k) => k >= 0));
+                node._activeIdx = idx;
+              } else { selectOnly(idx); node._selAnchor = idx; }
+            } else if (ev.ctrlKey || ev.metaKey) {
+              // Ctrl/Cmd = toggle this row in/out of the multi-selection.
+              if (node._selection.has(idx) && node._selection.size > 1) {
+                node._selection.delete(idx);
+                if (node._activeIdx === idx) node._activeIdx = node._selection.values().next().value ?? -1;
+              } else {
+                node._selection.add(idx); node._activeIdx = idx;
+              }
+              node._selAnchor = idx;
+            } else {
+              selectOnly(idx); node._selAnchor = idx;        // plain click → single select + set the range anchor
+            }
             commit();
           });
           dup.addEventListener("click", (e) => { e.stopPropagation(); startPlacing(node._boxes.indexOf(b)); });
@@ -2713,7 +2735,7 @@ app.registerExtension({
             if (idx < 0) return;
             removeBox(idx); commit(); fitCanvas();
           });
-          // Drag a row to RE-PARENT it: drop ONTO another row → become its child; drop on the "Regions"
+          // Drag a row to RE-PARENT it: drop ONTO another row → become its child; drop on the "Overview"
           // header → back to root. Cycle-guarded (can't drop onto self or a descendant).
           row.addEventListener("pointerdown", (e) => {
             if (e.button !== 0 || e.target === lock || e.target === dup || e.target === del || e.target === tri) return;

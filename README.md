@@ -27,10 +27,11 @@ A visual prompt builder for Ideogram 4's structured JSON caption format. Draw bo
 regions on a canvas, set each region's type / description / text / colors, and the node assembles
 the caption JSON.
 
-Includes an **Object Explorer** — a docked, collapsible list of every region. Click a row to
+Includes an **Overview panel** — a docked, collapsible tree of every region. Click a row to
 select it (two-way with the canvas), so you can pick and edit regions without accidentally
-nudging them on the canvas. Reorder, lock, duplicate, and delete from the list. (Region
-parenting / hierarchy is planned.)
+nudging them on the canvas. **Ctrl/Cmd-click** to multi-select, **Shift-click** for a range; lock,
+duplicate, delete, and **drag a row onto another to nest it** (parenting — move a parent on the
+canvas and its children follow). The hierarchy is editor-only; the exported caption stays flat.
 
 ## License & Credits
 
