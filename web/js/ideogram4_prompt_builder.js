@@ -1768,16 +1768,18 @@ app.registerExtension({
           node._activeIdx = hit.index;
           node._dragMode = hit.mode;
           node._boxAtStart = { ...node._boxes[hit.index] };
-          // Build the drag group. A MOVE drags each selected box's whole subtree (parenting: move a parent
-          // and its children follow); a RESIZE affects only the explicitly-selected boxes (children don't scale).
+          // Build the drag group. A MOVE drags each selected box's whole subtree (move a parent/group → its
+          // children follow). Resizing a GROUP scales the group's subtree with it. Both skip locked
+          // sub-branches (and resize skips unplaced children). Resizing a normal region scales only the
+          // explicitly-selected boxes (its children don't scale).
           const groupIdx = new Set(node._selection);
+          const kmap = new Map();
+          for (const bb of node._boxes) if (bb.parent != null) { if (!kmap.has(bb.parent)) kmap.set(bb.parent, []); kmap.get(bb.parent).push(bb); }
+          const addSub = (pid, skipUnplaced) => { for (const ch of (kmap.get(pid) || [])) { if (ch.locked || (skipUnplaced && ch.nobbox)) continue; groupIdx.add(node._boxes.indexOf(ch)); addSub(ch.id, skipUnplaced); } };
           if (hit.mode === "move") {
-            // Add each selected box's movable descendants, but do NOT descend through a locked box — a
-            // locked box and its whole subtree stay put, so its children aren't detached from it.
-            const kmap = new Map();
-            for (const bb of node._boxes) if (bb.parent != null) { if (!kmap.has(bb.parent)) kmap.set(bb.parent, []); kmap.get(bb.parent).push(bb); }
-            const addSub = (pid) => { for (const ch of (kmap.get(pid) || [])) { if (ch.locked) continue; groupIdx.add(node._boxes.indexOf(ch)); addSub(ch.id); } };
-            for (const si of [...node._selection]) addSub(node._boxes[si].id);
+            for (const si of [...node._selection]) addSub(node._boxes[si].id, false);
+          } else if (hit.mode.startsWith("resize") && node._boxes[hit.index].group) {
+            addSub(node._boxes[hit.index].id, true);          // resize a group → scale its placed children with it
           }
           if (groupIdx.size > 1) {                          // snapshot the whole group for group move/resize
             node._groupStart = {};
@@ -2670,7 +2672,7 @@ app.registerExtension({
           gt.textContent = "📁 " + (b.name || "Group");
           hint.appendChild(gt);
           const note = document.createElement("div");
-          note.style.color = "#888"; note.textContent = "Group (organizer) — not exported. Move it to move its members.";
+          note.style.color = "#888"; note.textContent = "Group (organizer) — not exported. Move it to move its members; resize its frame to scale them.";
           panel.appendChild(note);
           const nameRow = document.createElement("div"); nameRow.className = "ai2go-ideo-row";
           const nl = document.createElement("span"); nl.textContent = "name:"; nameRow.appendChild(nl);
