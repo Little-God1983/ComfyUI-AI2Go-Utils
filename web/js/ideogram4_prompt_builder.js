@@ -829,7 +829,11 @@ app.registerExtension({
       const exList = document.createElement("div");
       exList.className = "ai2go-ideo-exlist";
       stopProp(exList);
-      exList.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); openOverviewMenu(e.clientX, e.clientY); });
+      exList.addEventListener("contextmenu", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const row = e.target.closest ? e.target.closest(".ai2go-ideo-lrow") : null;
+        openOverviewMenu(e.clientX, e.clientY, row ? row._box : null);
+      });
       function applyExplorerCollapsed(on) {
         node.properties.explorerCollapsed = !!on;
         explorerEl.classList.toggle("collapsed", !!on);
@@ -1767,17 +1771,34 @@ app.registerExtension({
         if (node._ovMenu) { node._ovMenu.remove(); node._ovMenu = null; }
         node._ovDismiss?.disarm(); node._ovDismiss = null;
       }
-      function openOverviewMenu(clientX, clientY) {
+      function openOverviewMenu(clientX, clientY, ctxBox) {
         closeOverviewMenu();
         const menu = document.createElement("div");
         menu.className = "ai2go-ideo-menu";
-        const n = node._selection.size;
-        const item = document.createElement("div");
-        item.className = "ai2go-ideo-trow"; item.style.cssText = "padding:5px 10px;cursor:" + (n ? "pointer" : "default") + ";";
-        item.textContent = n ? `Create group from selection (${n})` : "Select regions first to group them";
-        if (!n) item.style.opacity = "0.5";
-        else item.addEventListener("click", () => { closeOverviewMenu(); createGroupFromSelection(); });
-        menu.appendChild(item);
+        const addItem = (label, enabled, onClick) => {
+          const it = document.createElement("div");
+          it.className = "ai2go-ideo-trow";
+          it.style.cssText = "padding:5px 10px;cursor:" + (enabled ? "pointer" : "default") + (enabled ? "" : ";opacity:0.5");
+          it.textContent = label;
+          if (enabled) it.addEventListener("click", () => { closeOverviewMenu(); onClick(); });
+          menu.appendChild(it);
+        };
+        // Act on the right-clicked row's box — or the whole selection if that row is part of it; else the selection.
+        const selN = node._selection.size;
+        let targets = ctxBox
+          ? (node._selection.has(node._boxes.indexOf(ctxBox)) ? [...node._selection].map((i) => node._boxes[i]) : [ctxBox])
+          : [...node._selection].map((i) => node._boxes[i]);
+        targets = targets.filter(Boolean);
+        const nested = targets.filter((b) => b.parent != null);   // only boxes that currently have a parent can move to root
+        addItem(selN ? `Create group from selection (${selN})` : "Select regions first to group them",
+          selN > 0, () => createGroupFromSelection());
+        addItem(nested.length ? `Move to root${nested.length > 1 ? " (" + nested.length + ")" : ""}` : "Move to root (nothing nested)",
+          nested.length > 0, () => {
+            for (const b of nested) setParent(b.id, null);
+            node._selection = new Set(nested.map((b) => node._boxes.indexOf(b)).filter((i) => i >= 0));
+            if (nested.length) node._activeIdx = node._boxes.indexOf(nested[nested.length - 1]);
+            commit();
+          });
         document.body.appendChild(menu);
         node._ovMenu = menu;
         const r = menu.getBoundingClientRect();
