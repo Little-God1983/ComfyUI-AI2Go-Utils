@@ -430,9 +430,8 @@ function injectStyle() {
     .ai2go-ideo-exptri:hover { color:#fff; }
     .ai2go-ideo-exptri.leaf { cursor:default; color:#444; }
     .ai2go-ideo-lrow.drop-into { box-shadow:inset 0 0 0 2px #46b4e6; background:#2a3a42; }
-    .ai2go-ideo-lrow.disabled .ai2go-ideo-ltext, .ai2go-ideo-lrow.disabled .ai2go-ideo-lnum, .ai2go-ideo-lrow.disabled .ai2go-ideo-lsw { opacity:0.4; }
-    .ai2go-ideo-en { padding:2px 4px; filter:grayscale(0.2); }
-    .ai2go-ideo-en.off { opacity:0.85; }
+    .ai2go-ideo-lrow.disabled { opacity:0.5; }                 /* whole row dims when hidden (own or via its group) */
+    .ai2go-ideo-en { padding:2px 4px; }
     .ai2go-ideo-exhead.drop-root { box-shadow:inset 0 0 0 2px #46b4e6; }
   `;
   document.head.appendChild(s);
@@ -2852,11 +2851,17 @@ app.registerExtension({
           row.className = "ai2go-ideo-lrow" + ((i === node._activeIdx || node._selection.has(i)) ? " active" : "") + (isDisabled(b) ? " disabled" : "");
           row.style.paddingLeft = (4 + depth * 13) + "px";    // indentation = tree depth
           row._box = b;
-          const enableBtn = document.createElement("button");  // enable/disable toggle (cascades to children for a group)
-          enableBtn.className = "ai2go-ideo-lbtn ai2go-ideo-en" + (b.disabled ? " off" : "");
-          enableBtn.textContent = b.disabled ? "🚫" : "👁";
-          enableBtn.title = b.disabled ? "Disabled — click to enable"
-            : "Enabled — click to disable (hides it" + (b.group ? " and its members" : "") + " from the canvas and the prompt)";
+          const ownOff = !!b.disabled, effOff = isDisabled(b);   // effOff = own OR any ancestor disabled
+          const enableBtn = document.createElement("button");  // enable/disable toggle (a group is the master switch for its members)
+          enableBtn.className = "ai2go-ideo-lbtn ai2go-ideo-en" + (effOff ? " off" : "");
+          enableBtn.textContent = effOff ? "🚫" : "👁";        // EFFECTIVE visibility: a child of a disabled group reads as hidden
+          if (effOff && !ownOff) {                              // hidden only because an ancestor group is off
+            enableBtn.disabled = true;                          // not individually toggleable — flip the group instead
+            enableBtn.title = "Hidden by its group — toggle the group to show it";
+          } else {
+            enableBtn.title = ownOff ? "Disabled — click to enable"
+              : "Enabled — click to disable (hides it" + (b.group ? " and its members" : "") + " from the canvas and the prompt)";
+          }
           stopProp(enableBtn);
           enableBtn.addEventListener("click", (e) => { e.stopPropagation(); b.disabled = !b.disabled; commit(); });
           const tri = document.createElement("span");
