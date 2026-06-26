@@ -431,7 +431,8 @@ function injectStyle() {
     .ai2go-ideo-exptri.leaf { cursor:default; color:#444; }
     .ai2go-ideo-lrow.drop-into { box-shadow:inset 0 0 0 2px #46b4e6; background:#2a3a42; }
     .ai2go-ideo-lrow.disabled .ai2go-ideo-ltext, .ai2go-ideo-lrow.disabled .ai2go-ideo-lnum, .ai2go-ideo-lrow.disabled .ai2go-ideo-lsw { opacity:0.4; }
-    .ai2go-ideo-en { flex:0 0 auto; margin:0 1px 0 0; cursor:pointer; }
+    .ai2go-ideo-en { padding:2px 4px; filter:grayscale(0.2); }
+    .ai2go-ideo-en.off { opacity:0.85; }
     .ai2go-ideo-exhead.drop-root { box-shadow:inset 0 0 0 2px #46b4e6; }
   `;
   document.head.appendChild(s);
@@ -2851,12 +2852,13 @@ app.registerExtension({
           row.className = "ai2go-ideo-lrow" + ((i === node._activeIdx || node._selection.has(i)) ? " active" : "") + (isDisabled(b) ? " disabled" : "");
           row.style.paddingLeft = (4 + depth * 13) + "px";    // indentation = tree depth
           row._box = b;
-          const enableChk = document.createElement("input");  // enable/disable toggle (cascades to children for a group)
-          enableChk.type = "checkbox"; enableChk.className = "ai2go-ideo-en"; enableChk.checked = !b.disabled;
-          enableChk.title = b.disabled ? "Disabled — click to enable"
+          const enableBtn = document.createElement("button");  // enable/disable toggle (cascades to children for a group)
+          enableBtn.className = "ai2go-ideo-lbtn ai2go-ideo-en" + (b.disabled ? " off" : "");
+          enableBtn.textContent = b.disabled ? "🚫" : "👁";
+          enableBtn.title = b.disabled ? "Disabled — click to enable"
             : "Enabled — click to disable (hides it" + (b.group ? " and its members" : "") + " from the canvas and the prompt)";
-          stopProp(enableChk);
-          enableChk.addEventListener("change", (e) => { e.stopPropagation(); b.disabled = !enableChk.checked; commit(); });
+          stopProp(enableBtn);
+          enableBtn.addEventListener("click", (e) => { e.stopPropagation(); b.disabled = !b.disabled; commit(); });
           const tri = document.createElement("span");
           tri.className = "ai2go-ideo-exptri" + (hasKids ? "" : " leaf");
           tri.textContent = hasKids ? (b.collapsed ? "▶" : "▼") : "•";
@@ -2883,7 +2885,7 @@ app.registerExtension({
           del.className = "ai2go-ideo-lbtn del"; del.textContent = "✕";
           del.title = b.locked ? "Unlock to delete" : "Delete region (children promote to its parent)";
           del.disabled = !!b.locked;
-          row.append(tri, enableChk, sw, num, txt, lock, dup, del);
+          row.append(tri, enableBtn, sw, num, txt, lock, dup, del);
           exList.appendChild(row);
 
           if (hasKids) tri.addEventListener("click", (e) => {
@@ -2947,7 +2949,7 @@ app.registerExtension({
           // any nesting inside the selection is preserved. Cycle-guarded (can't drop onto a dragged box or
           // a descendant of one).
           row.addEventListener("pointerdown", (e) => {
-            if (e.button !== 0 || e.target === lock || e.target === dup || e.target === del || e.target === tri || e.target === enableChk || b.locked) return;  // locked = frozen, no reparent
+            if (e.button !== 0 || e.target === lock || e.target === dup || e.target === del || e.target === tri || e.target === enableBtn || b.locked) return;  // locked = frozen, no reparent
             e.preventDefault(); e.stopPropagation();
             const sx = e.clientX, sy = e.clientY;
             const myIdx = node._boxes.indexOf(b);
