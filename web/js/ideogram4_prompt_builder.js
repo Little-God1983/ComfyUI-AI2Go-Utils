@@ -505,9 +505,14 @@ app.registerExtension({
       importBtn.className = "ai2go-ideo-btn";
       importBtn.textContent = "Paste";
       importBtn.title = "Parse a caption JSON (clipboard, else paste prompt) and populate the node";
+      const clearCanvasBtn = document.createElement("button");
+      clearCanvasBtn.className = "ai2go-ideo-btn";
+      clearCanvasBtn.textContent = "Clear canvas";
+      clearCanvasBtn.title = "Remove all boxes from the canvas — leaves the caption text fields and style palette untouched";
       const clearBtn = document.createElement("button");
       clearBtn.className = "ai2go-ideo-btn";
       clearBtn.textContent = "Clear all";
+      clearBtn.title = "Reset the whole node — boxes, style palette, and every caption text field";
       const tokenSpan = document.createElement("span");
       tokenSpan.style.cssText = "color:#888; white-space:nowrap;";
       tokenSpan.title = "Rough token estimate (~chars/4). Grey <256, green healthy, orange nearing, red ≥2048 (model cap — will error)";
@@ -777,7 +782,7 @@ app.registerExtension({
       }
       groupsBtn.addEventListener("click", () => { node.properties.showGroups = (node.properties.showGroups !== true); syncGroupsBtn(); drawCanvas(); flushChange(); });
       syncGroupsBtn();
-      bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(outBtn); bar.appendChild(bgBtn); bar.appendChild(txtBtn); bar.appendChild(groupsBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(clearBtn);
+      bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(outBtn); bar.appendChild(bgBtn); bar.appendChild(txtBtn); bar.appendChild(groupsBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(clearCanvasBtn); bar.appendChild(clearBtn);
       updateGrabBtn();
 
       // Persistent global style-palette row
@@ -2328,13 +2333,27 @@ app.registerExtension({
         closeInlineEditor();
         openLayersMenu(e.clientX, e.clientY);
       });
-      stopProp(clearBtn);
-      clearBtn.addEventListener("click", () => {
+      // Clear canvas: wipe only the boxes/selection. Caption text fields and the style palette stay put.
+      const clearCanvas = () => {
         closeInlineEditor();
-        node._boxes = []; node._activeIdx = -1; node._selection = new Set(); node._stylePalette = [];
-        node._lastImported = "";
-        commit(); rebuildStylePalette(); fitCanvas();   // a wired import re-seeds on the next run (serializeValue cache-busts)
-      });
+        node._boxes = []; node._activeIdx = -1; node._selection = new Set();
+        commit(); fitCanvas();
+      };
+      // Clear all: full reset — boxes, palette, and every caption text widget (the "top" of the node).
+      const clearAll = () => {
+        clearCanvas();
+        node._stylePalette = [];
+        node._lastImported = "";   // a wired import re-seeds on the next run (serializeValue cache-busts)
+        for (const name of ["background", "high_level_description", "aesthetics", "lighting", "medium", "style"]) {
+          const w = findW(name);
+          if (w) { w.value = ""; w.callback?.(w.value, app.canvas, node); }
+        }
+        commit(); rebuildStylePalette(); updateTokens();
+      };
+      stopProp(clearCanvasBtn);
+      clearCanvasBtn.addEventListener("click", clearCanvas);
+      stopProp(clearBtn);
+      clearBtn.addEventListener("click", clearAll);
 
       // ── build caption JSON (mirrors Python key order) ──
       // pyJson: matches Python _dumps — indent=4, but scalar arrays stay on one line.
