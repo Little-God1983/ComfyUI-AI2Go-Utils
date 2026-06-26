@@ -2851,12 +2851,14 @@ app.registerExtension({
           row.className = "ai2go-ideo-lrow" + ((i === node._activeIdx || node._selection.has(i)) ? " active" : "") + (isDisabled(b) ? " disabled" : "");
           row.style.paddingLeft = (4 + depth * 13) + "px";    // indentation = tree depth
           row._box = b;
-          const ownOff = !!b.disabled, effOff = isDisabled(b);   // effOff = own OR any ancestor disabled
+          const ownOff = !!b.disabled;
+          const ancestorOff = b.parent != null && isDisabled(boxById(b.parent));   // a parent group (or higher) is off
+          const effOff = ownOff || ancestorOff;
           const enableBtn = document.createElement("button");  // enable/disable toggle (a group is the master switch for its members)
           enableBtn.className = "ai2go-ideo-lbtn ai2go-ideo-en" + (effOff ? " off" : "");
           enableBtn.textContent = effOff ? "🚫" : "👁";        // EFFECTIVE visibility: a child of a disabled group reads as hidden
-          if (effOff && !ownOff) {                              // hidden only because an ancestor group is off
-            enableBtn.disabled = true;                          // not individually toggleable — flip the group instead
+          if (ancestorOff) {                                    // master-switched off by its group → not individually toggleable
+            enableBtn.disabled = true;                          // flip the group instead
             enableBtn.title = "Hidden by its group — toggle the group to show it";
           } else {
             enableBtn.title = ownOff ? "Disabled — click to enable"
