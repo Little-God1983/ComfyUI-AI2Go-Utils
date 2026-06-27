@@ -279,13 +279,15 @@ app.registerExtension({
             const w = target.widgets?.find((x) => x.name === name);
             if (w) { w.value = val; w.callback?.(val); }
           };
+          // Mirror the wizard exactly, including clears: photo -> "photo", else art_style -> "art_style",
+          // else "none". Setting "none" rebuilds the combo without a photo/art_style sub-widget, so a
+          // cleared wizard actually clears the builder's photo/art_style (was the "stays filled" bug).
           const p = node._wiz.photo.trim(), ar = node._wiz.art_style.trim();
-          const kind = p ? "photo" : (ar ? "art_style" : null);
-          if (kind) {
-            const styleW = target.widgets?.find((x) => x.name === "style");
-            if (styleW) styleW.value = kind;                 // DynamicCombo setter rebuilds sub-widgets
-            if (kind === "photo") set("style.photo", p); else set("style.art_style", ar);
-          }
+          const kind = p ? "photo" : (ar ? "art_style" : "none");
+          const styleW = target.widgets?.find((x) => x.name === "style");
+          if (styleW) styleW.value = kind;                   // DynamicCombo setter rebuilds sub-widgets
+          if (kind === "photo") set("style.photo", p);
+          else if (kind === "art_style") set("style.art_style", ar);
           set("aesthetics", node._wiz.aesthetics.trim());
           set("lighting", node._wiz.lighting.trim());
           set("medium", node._wiz.medium.trim());
@@ -370,9 +372,10 @@ app.registerExtension({
           const footRow = document.createElement("div"); footRow.className = "ai2go-wiz-footrow";
           const spacer = document.createElement("span"); spacer.style.flex = "1";
           const clearBtn = document.createElement("button"); clearBtn.className = "ai2go-wiz-btn"; clearBtn.textContent = "Clear all";
+          const clearApplyBtn = document.createElement("button"); clearApplyBtn.className = "ai2go-wiz-btn"; clearApplyBtn.textContent = "Clear & apply";
           const applyBtn = document.createElement("button"); applyBtn.className = "ai2go-wiz-btn"; applyBtn.textContent = "Apply";
           const doneBtn = document.createElement("button"); doneBtn.className = "ai2go-wiz-btn primary"; doneBtn.textContent = "Apply & close";
-          footRow.append(spacer, clearBtn, applyBtn, doneBtn);
+          footRow.append(spacer, clearBtn, clearApplyBtn, applyBtn, doneBtn);
           foot.append(status, warn, prev, footRow);
 
           function updatePreview() {
@@ -429,8 +432,11 @@ app.registerExtension({
           for (const cat of categories) body.appendChild(buildCatBlock(cat));
           updatePreview(); updateStatus();
 
-          clearBtn.addEventListener("click", () => { node._wiz = BLANK(); for (const r of refreshers) r(); persist(); updatePreview(); });
-          applyBtn.addEventListener("click", () => { const n = applyToBuilder(true); if (n) toast("Applied to " + n + " builder" + (n > 1 ? "s" : "") + " ✓"); updateStatus(); });
+          function clearWiz() { node._wiz = BLANK(); for (const r of refreshers) r(); persist(); updatePreview(); }
+          const applied = (n) => { if (n) toast("Applied to " + n + " builder" + (n > 1 ? "s" : "") + " ✓"); updateStatus(); };
+          clearBtn.addEventListener("click", clearWiz);
+          clearApplyBtn.addEventListener("click", () => { clearWiz(); applied(applyToBuilder(true)); });
+          applyBtn.addEventListener("click", () => applied(applyToBuilder(true)));
           doneBtn.addEventListener("click", () => close(true, true));
         }
 
