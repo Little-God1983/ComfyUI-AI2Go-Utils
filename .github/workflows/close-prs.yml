@@ -13,6 +13,8 @@ permissions:
 
 jobs:
   close:
+    # Only auto-close PRs from other people; the repo owner's own PRs stay open.
+    if: github.event.pull_request.user.login != github.repository_owner
     runs-on: ubuntu-latest
     steps:
       - uses: actions/github-script@v7
