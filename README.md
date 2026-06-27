@@ -83,6 +83,22 @@ scene-graph **Overview**, region **parenting**, and named **groups** layered on 
   KJNodes ignores the extra data and loads the flat scene, and KJNodes captions load here flat too.
   The sidecar never reaches the model prompt.
 
+### AI2Go Ideogram 4 Style Wizard
+
+A "click-together" helper for the **style fields** of an Ideogram 4 caption — so you don't have to type
+`aesthetics` / `lighting` / `medium` / `photo` / `art_style` by hand.
+
+- Wire the wizard's **`style`** output into a **Prompt Builder's `import_json`** input (the link just
+  tells the wizard which builder to fill).
+- Click **🪄 Open Style Wizard** to open a chip-picker with one section per category. Toggle one or many
+  chips (they're comma-joined), or type your own terms in each category's text field. A **live JSON
+  preview** shows the assembled `style_description`.
+- **Photo vs. art_style** are both selectable; if you set both, a warning notes that only `photo` is
+  applied (Ideogram allows only one).
+- On close, the picks are **written straight into the connected builder's** style widgets — your
+  bounding boxes, color palette, and `high_level_description` are left untouched. The node emits an
+  empty string at run time, so the wire into `import_json` never overwrites the builder's regions.
+
 ## Credits & License
 
 Licensed under **GPL-3.0** — see [LICENSE](LICENSE).
