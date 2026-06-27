@@ -77,7 +77,7 @@ function parsePresets(text) {
   for (let n = 0; n < cats.length; n++) {
     const c = cats[n], where = "category " + (n + 1);
     if (!c || typeof c !== "object") return { cats: null, error: where + " is not an object." };
-    if (!ALLOWED_KEYS.includes(c.key)) return { cats: null, error: where + ': "key" must be one of ' + ALLOWED_KEYS.join(", ") + ' (got ' + JSON.stringify(c.key) + ").") };
+    if (!ALLOWED_KEYS.includes(c.key)) return { cats: null, error: where + ': "key" must be one of ' + ALLOWED_KEYS.join(", ") + ' (got ' + JSON.stringify(c.key) + ")." };
     if (seen.has(c.key)) return { cats: null, error: where + ': duplicate key "' + c.key + '".' };
     if (!Array.isArray(c.chips)) return { cats: null, error: where + ' ("' + c.key + '"): "chips" must be an array.' };
     seen.add(c.key);
