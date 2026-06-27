@@ -372,7 +372,7 @@ app.registerExtension({
           const footRow = document.createElement("div"); footRow.className = "ai2go-wiz-footrow";
           const spacer = document.createElement("span"); spacer.style.flex = "1";
           const clearBtn = document.createElement("button"); clearBtn.className = "ai2go-wiz-btn"; clearBtn.textContent = "Clear all";
-          const clearApplyBtn = document.createElement("button"); clearApplyBtn.className = "ai2go-wiz-btn"; clearApplyBtn.textContent = "Clear & apply";
+          const clearApplyBtn = document.createElement("button"); clearApplyBtn.className = "ai2go-wiz-btn"; clearApplyBtn.textContent = "Clear & apply & close";
           const applyBtn = document.createElement("button"); applyBtn.className = "ai2go-wiz-btn"; applyBtn.textContent = "Apply";
           const doneBtn = document.createElement("button"); doneBtn.className = "ai2go-wiz-btn primary"; doneBtn.textContent = "Apply & close";
           footRow.append(spacer, clearBtn, clearApplyBtn, applyBtn, doneBtn);
@@ -435,7 +435,7 @@ app.registerExtension({
           function clearWiz() { node._wiz = BLANK(); for (const r of refreshers) r(); persist(); updatePreview(); }
           const applied = (n) => { if (n) toast("Applied to " + n + " builder" + (n > 1 ? "s" : "") + " ✓"); updateStatus(); };
           clearBtn.addEventListener("click", clearWiz);
-          clearApplyBtn.addEventListener("click", () => { clearWiz(); applied(applyToBuilder(true)); });
+          clearApplyBtn.addEventListener("click", () => { clearWiz(); close(true, true); });
           applyBtn.addEventListener("click", () => applied(applyToBuilder(true)));
           doneBtn.addEventListener("click", () => close(true, true));
         }
