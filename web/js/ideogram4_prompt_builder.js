@@ -775,12 +775,12 @@ app.registerExtension({
       groupsBtn.className = "ai2go-ideo-btn"; groupsBtn.textContent = "👁️";
       stopProp(groupsBtn);
       function syncGroupsBtn() {
-        const shown = node.properties.showGroups === true;     // hidden by default; only `true` shows the frames
+        const shown = node.properties.showGroups !== false;    // shown by default; only an explicit `false` hides the frames
         groupsBtn.classList.toggle("active", shown);
         groupsBtn.title = shown ? "Group frames visible on the canvas — click to hide (they stay in the Overview)"
                                 : "Group frames hidden on the canvas — click to show (they're in the Overview)";
       }
-      groupsBtn.addEventListener("click", () => { node.properties.showGroups = (node.properties.showGroups !== true); syncGroupsBtn(); drawCanvas(); flushChange(); });
+      groupsBtn.addEventListener("click", () => { node.properties.showGroups = (node.properties.showGroups === false); syncGroupsBtn(); drawCanvas(); flushChange(); });
       syncGroupsBtn();
       bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(outBtn); bar.appendChild(bgBtn); bar.appendChild(txtBtn); bar.appendChild(groupsBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(clearCanvasBtn); bar.appendChild(clearBtn);
       updateGrabBtn();
@@ -1209,7 +1209,7 @@ app.registerExtension({
         const res = [];
         for (let i = 0; i < node._boxes.length; i++) {
           const b = node._boxes[i];
-          if (b.locked || isDisabled(b) || (b.group && node.properties.showGroups !== true)) continue;   // locked, disabled, or a hidden group isn't grabbable
+          if (b.locked || isDisabled(b) || (b.group && node.properties.showGroups === false)) continue;   // locked, disabled, or a hidden group isn't grabbable
           const rx = Math.min(baseRx, b.w / 3), ry = Math.min(baseRy, b.h / 3);  // shrink handles on small boxes so a central move zone remains
           const mode = rectHitTestN(mN.x, mN.y, b.x, b.y, b.x + b.w, b.y + b.h, rx, ry);
           if (mode) res.push({ index: i, mode });
@@ -1480,7 +1480,7 @@ app.registerExtension({
           const w = x2 - x1, h = y2 - y1;
           const hovered = (i === node._hoverBox && !b.locked) || selected;  // locked boxes don't hover; selected stay highlighted
           if (b.group) {                                     // group container: dashed frame + name; no palette strip / desc / number
-            if (node.properties.showGroups !== true) continue;   // groups hidden by default on the canvas (still shown in the Overview)
+            if (node.properties.showGroups === false) continue;   // groups shown by default on the canvas (hide via the 👁️ toggle)
             const gcol = pal.length ? pal[0] : "#46b4e6";
             if (selected) { ctx.fillStyle = "rgba(26,26,26,0.55)"; ctx.fillRect(x1, y1, w, h); }
             ctx.save();
@@ -1619,6 +1619,36 @@ app.registerExtension({
         const out = new Set(), stack = [...(kids.get(id) || [])];
         while (stack.length) { const cid = stack.pop(); if (out.has(cid)) continue; out.add(cid); for (const k of (kids.get(cid) || [])) stack.push(k); }
         return out;
+      }
+      // Grow/shrink a group's frame so it wraps its placed members again (same margin as createGroupFromSelection).
+      // Computed from leaf regions only (nested group frames are derived themselves), so refit order doesn't matter.
+      function refitGroup(groupId) {
+        const g = boxById(groupId); if (!g || !g.group) return;
+        let minx = 1, miny = 1, maxx = 0, maxy = 0, any = false;
+        for (const cid of descendantIds(groupId)) {
+          const b = boxById(cid);
+          if (!b || b.group || b.nobbox) continue;       // only placed regions define the extent
+          minx = Math.min(minx, b.x); miny = Math.min(miny, b.y);
+          maxx = Math.max(maxx, b.x + b.w); maxy = Math.max(maxy, b.y + b.h); any = true;
+        }
+        if (!any) return;                                // empty / all-unplaced group — leave its frame as-is
+        const pad = 0.015;
+        const nx = clamp01(minx - pad), ny = clamp01(miny - pad);
+        g.x = nx; g.y = ny; g.w = clamp01(maxx + pad) - nx; g.h = clamp01(maxy + pad) - ny;
+      }
+      // After a drag, refit every ancestor group of a moved box — except a group dragged as a whole
+      // (its frame scaled with its members, so its padding is intentional and must be preserved).
+      function refitAncestorGroups(draggedIds) {
+        const toFit = new Set();
+        for (const id of draggedIds) {
+          let cur = boxById(id), guard = 0;
+          while (cur && cur.parent != null && guard++ < 1000) {
+            const p = boxById(cur.parent); if (!p) break;
+            if (p.group && !draggedIds.has(p.id)) toFit.add(p.id);
+            cur = p;
+          }
+        }
+        for (const gid of toFit) refitGroup(gid);
       }
       // Set (parentId=null clears) a box's parent, rejecting self / missing target / cycles. Returns true if applied.
       function setParent(childId, parentId) {
@@ -2090,6 +2120,14 @@ app.registerExtension({
           selectOnly(-1);
         } else if (node._pendingCollapse >= 0) {     // click (no drag) on a group member → keep only it
           selectOnly(node._pendingCollapse);
+        }
+        // Refit the frame of any group whose members just moved/resized, so the dashed outline keeps
+        // wrapping them (a member can no longer drift outside its group's frame).
+        if (node._dragMode !== "draw") {
+          const dragged = node._groupStart
+            ? new Set(Object.keys(node._groupStart).map((i) => node._boxes[Number(i)]?.id).filter(Boolean))
+            : new Set([b?.id].filter(Boolean));
+          refitAncestorGroups(dragged);
         }
         node._pendingCollapse = -1; node._groupStart = null;
         commit();
