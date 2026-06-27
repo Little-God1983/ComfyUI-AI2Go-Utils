@@ -90,20 +90,25 @@ A "click-together" helper for the **style fields** of an Ideogram 4 caption — 
 
 - Wire the wizard's **`style`** output into a **Prompt Builder's `import_json`** input (the link just
   tells the wizard which builder to fill).
-- Click **🪄 Open Style Wizard** to open a chip-picker with one section per category. Toggle one or many
-  chips (they're comma-joined), or type your own terms in each category's text field. A **live JSON
-  preview** shows the assembled `style_description`.
+- Click **🪄 Open Style Wizard** to open a two-tab modal. On the **Pick styles** tab, toggle one or many
+  chips per category (they're comma-joined) or type your own; a **search box** filters chips, a **live
+  JSON preview** shows the assembled `style_description`, and a **status line** names the builder you're
+  writing to (or warns if nothing's connected).
 - **Photo vs. art_style** are both selectable; if you set both, a warning notes that only `photo` is
   applied (Ideogram allows only one).
-- On close, the picks are **written straight into the connected builder's** style widgets — your
-  bounding boxes, color palette, and `high_level_description` are left untouched. The node emits an
-  empty string at run time, so the wire into `import_json` never overwrites the builder's regions.
+- **Apply** pushes the picks to the connected builder without closing (handy for tweaking); **Apply &
+  close** (and Esc / clicking the backdrop) does the same and closes. Either way the picks are
+  **written straight into the builder's** style widgets — your bounding boxes, color palette, and
+  `high_level_description` are left untouched, and the node emits an empty string at run time so the
+  `import_json` wire never overwrites the builder's regions.
 
-**Editable chip presets.** The chip lists are read from
-`ComfyUI/user/default/ai2go/ideogram4/WizardStylesDefault.json` — edit it to add, reorder, or replace
-chips (each entry's `key` must be one of `aesthetics`, `lighting`, `medium`, `photo`, `art_style`). If
-the file is **missing or malformed**, the wizard falls back to the built-in defaults and shows a
-warning with a **Restore defaults** button that (re)creates the file for you.
+**Editable chip presets.** The chip lists live in
+`ComfyUI/user/default/ai2go/ideogram4/WizardStylesDefault.json`. Edit them right in the wizard on the
+**Edit presets** tab — add, rename, or delete chips per category, then **Save to file** (or **Discard** /
+**Restore defaults**). You can also hand-edit the JSON (each entry's `key` must be one of `aesthetics`,
+`lighting`, `medium`, `photo`, `art_style`). If the file is **missing or malformed**, the wizard falls
+back to the built-in defaults and shows a warning (with the exact parse error) plus a **Restore
+defaults** button that (re)creates the file.
 
 ## Credits & License
 
