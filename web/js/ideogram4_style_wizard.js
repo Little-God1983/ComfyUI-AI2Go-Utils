@@ -174,8 +174,8 @@ function injectWizStyle() {
     .ai2go-wiz-body { flex:1 1 auto; overflow-y:auto; padding:12px 14px; display:flex; flex-direction:column; gap:14px; }
     .ai2go-wiz-search { width:100%; box-sizing:border-box; background:#1d1d1d; border:1px solid #444; border-radius:4px; color:#ddd; font:12px sans-serif; padding:5px 8px; }
     .ai2go-wiz-search:focus { border-color:#46b4e6; outline:none; color:#fff; }
-    .ai2go-wiz-status { font:11px sans-serif; color:#8fbfd6; min-height:14px; }
-    .ai2go-wiz-status.off { color:#e6a23c; }
+    .ai2go-wiz-status { font:13px sans-serif; color:#8fbfd6; min-height:17px; }
+    .ai2go-wiz-status.off { color:#e05555; font-weight:600; }
     .ai2go-wiz-edit { display:flex; flex-direction:column; gap:5px; }
     .ai2go-wiz-editrow { display:flex; align-items:center; gap:6px; }
     .ai2go-wiz-editrow .ai2go-wiz-input { font:12px sans-serif; }
