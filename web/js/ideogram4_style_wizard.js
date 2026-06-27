@@ -14,10 +14,12 @@ const { app } = window.comfyAPI.app;
 
 const BUILDER_TYPE = "AI2GoIdeogram4PromptBuilder";
 
-// Fixed chip lists (values are exactly what lands in the JSON). Sourced from the research report.
+// Built-in chip lists (values are exactly what lands in the JSON). Sourced from the research report.
+// These are the fallback / "restore defaults" content; the live lists are read from an editable
+// preset file (see PRESET_FILE) so users can add or replace styles without touching the code.
 // Note: some Photo values contain commas — that's fine; selection uses substring containment, not a
 // naive comma split, so a multi-word value is treated as one chip.
-const CATEGORIES = [
+const DEFAULT_CATEGORIES = [
   { key: "aesthetics", label: "Aesthetics", chips: [
     "cinematic", "moody", "dreamy", "serene", "vintage", "minimalist", "surreal", "vibrant",
     "cozy", "dramatic", "ethereal", "nostalgic", "dark", "clean", "elegant",
@@ -46,6 +48,59 @@ const CATEGORIES = [
 ];
 
 const BLANK = () => ({ aesthetics: "", lighting: "", medium: "", photo: "", art_style: "" });
+
+// ── Editable style presets, stored server-side via ComfyUI's userdata API. This path maps to
+// ComfyUI/user/default/ai2go/ideogram4/WizardStylesDefault.json. Users can edit the file to add or
+// replace chips; if it's missing or malformed we fall back to DEFAULT_CATEGORIES and warn in the UI.
+const PRESET_FILE = "ai2go/ideogram4/WizardStylesDefault.json";
+const ALLOWED_KEYS = ["aesthetics", "lighting", "medium", "photo", "art_style"];
+const DEFAULT_LABELS = Object.fromEntries(DEFAULT_CATEGORIES.map((c) => [c.key, c.label]));
+// File body written by "Restore defaults": a documented, hand-editable shape.
+const DEFAULT_PRESETS_FILE = {
+  _comment: "AI2Go Ideogram 4 Style Wizard presets. Edit 'chips' freely; 'key' must be one of " +
+    ALLOWED_KEYS.join(", ") + ". Delete this file or use the wizard's 'Restore defaults' to reset.",
+  version: 1,
+  categories: DEFAULT_CATEGORIES.map((c) => ({ key: c.key, label: c.label, chips: c.chips.slice() })),
+};
+
+// Validate + normalize a parsed preset file into the internal [{key,label,chips}] shape.
+// Returns the category array on success, or null if the structure is unusable (→ caller treats as malformed).
+function parsePresets(text) {
+  let obj;
+  try { obj = JSON.parse(text); } catch (e) { return null; }
+  const cats = Array.isArray(obj) ? obj : (obj && Array.isArray(obj.categories) ? obj.categories : null);
+  if (!cats || !cats.length) return null;
+  const seen = new Set();
+  const out = [];
+  for (const c of cats) {
+    if (!c || typeof c !== "object") return null;
+    if (!ALLOWED_KEYS.includes(c.key) || seen.has(c.key)) return null;   // unknown / duplicate key
+    if (!Array.isArray(c.chips)) return null;
+    seen.add(c.key);
+    const chips = c.chips.filter((x) => typeof x === "string" && x.trim()).map((x) => x.trim());
+    const label = typeof c.label === "string" && c.label.trim() ? c.label.trim() : (DEFAULT_LABELS[c.key] || c.key);
+    out.push({ key: c.key, label, chips });
+  }
+  return out;
+}
+
+// Load the live categories: { cats, state } where state is "ok" | "missing" | "malformed".
+// Always returns usable cats (the file's when valid, else the built-in defaults).
+async function loadCategories() {
+  let res;
+  try { res = await app.api.getUserData(PRESET_FILE); } catch (e) { res = null; }
+  if (!res || res.status !== 200) return { cats: DEFAULT_CATEGORIES, state: "missing" };
+  let text = "";
+  try { text = await res.text(); } catch (e) { return { cats: DEFAULT_CATEGORIES, state: "malformed" }; }
+  const cats = parsePresets(text);
+  return cats ? { cats, state: "ok" } : { cats: DEFAULT_CATEGORIES, state: "malformed" };
+}
+
+// Write the built-in defaults to the preset file (used by the "Restore defaults" button).
+async function saveDefaultPresets() {
+  await app.api.storeUserData(PRESET_FILE, JSON.stringify(DEFAULT_PRESETS_FILE, null, 2),
+    { overwrite: true, stringify: false, throwOnError: true });
+}
 
 // Normalize a comma-joined field: collapse whitespace around commas, drop empty/duplicate items.
 function normField(s) {
@@ -89,6 +144,10 @@ function injectWizStyle() {
     .ai2go-wiz-head { display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid #333; font:13px sans-serif; color:#ddd; }
     .ai2go-wiz-title { flex:1 1 auto; font-weight:600; }
     .ai2go-wiz-body { flex:1 1 auto; overflow-y:auto; padding:12px 14px; display:flex; flex-direction:column; gap:14px; }
+    .ai2go-wiz-banner { display:flex; align-items:flex-start; gap:10px; padding:8px 10px; border-radius:6px; background:#3a2f1a; border:1px solid #6b5320; color:#e6c98c; font:11px/1.5 sans-serif; }
+    .ai2go-wiz-banner code { color:#f0d9a6; font:11px monospace; }
+    .ai2go-wiz-banner .ai2go-wiz-btn { flex:0 0 auto; align-self:center; }
+    .ai2go-wiz-banner-msg { flex:1 1 auto; }
     .ai2go-wiz-cat { display:flex; flex-direction:column; gap:6px; }
     .ai2go-wiz-catlbl { font:11px sans-serif; color:#8fbfd6; letter-spacing:0.03em; text-transform:uppercase; }
     .ai2go-wiz-chips { display:flex; flex-wrap:wrap; gap:5px; }
@@ -193,8 +252,13 @@ app.registerExtension({
       node._wizApply = applyToBuilder;
 
       // ── modal ──
-      function openModal() {
+      async function openModal() {
+        if (node._wizOverlay || node._wizOpening) return;
+        node._wizOpening = true;                              // guard the async load against double-open
+        let loaded;
+        try { loaded = await loadCategories(); } finally { node._wizOpening = false; }
         if (node._wizOverlay) return;
+
         const ov = document.createElement("div"); ov.className = "ai2go-wiz-fs";
         const panel = document.createElement("div"); panel.className = "ai2go-wiz-panel";
         ov.appendChild(panel);
@@ -206,41 +270,6 @@ app.registerExtension({
 
         const body = document.createElement("div"); body.className = "ai2go-wiz-body";
         const refreshers = [];   // per-category fns that re-sync chip highlight + input value from node._wiz
-
-        for (const cat of CATEGORIES) {
-          const block = document.createElement("div"); block.className = "ai2go-wiz-cat";
-          const lbl = document.createElement("div"); lbl.className = "ai2go-wiz-catlbl"; lbl.textContent = cat.label;
-          const chipsWrap = document.createElement("div"); chipsWrap.className = "ai2go-wiz-chips";
-          const input = document.createElement("input");
-          input.className = "ai2go-wiz-input"; input.type = "text";
-          input.placeholder = "click chips above, or type your own (comma-separated)";
-          input.value = node._wiz[cat.key];
-
-          const chipEls = cat.chips.map((term) => {
-            const c = document.createElement("button");
-            c.className = "ai2go-wiz-chip"; c.textContent = term; c.title = term;
-            c.addEventListener("click", () => {
-              node._wiz[cat.key] = toggleTerm(node._wiz[cat.key], term);
-              input.value = node._wiz[cat.key];
-              syncCat(); persist(); updatePreview();
-            });
-            return { term, el: c };
-          });
-          chipEls.forEach((c) => chipsWrap.appendChild(c.el));
-
-          input.addEventListener("input", () => {
-            node._wiz[cat.key] = input.value;   // keep raw while typing; normalized on chip-toggle/apply
-            syncChips(); persist(); updatePreview();
-          });
-
-          function syncChips() { for (const c of chipEls) c.el.classList.toggle("active", hasTerm(node._wiz[cat.key], c.term)); }
-          function syncCat() { input.value = node._wiz[cat.key]; syncChips(); }
-          syncChips();
-          refreshers.push(syncCat);
-
-          block.append(lbl, chipsWrap, input);
-          body.appendChild(block);
-        }
 
         const foot = document.createElement("div"); foot.className = "ai2go-wiz-foot";
         const warn = document.createElement("div"); warn.className = "ai2go-wiz-warn";
@@ -260,7 +289,79 @@ app.registerExtension({
             ? "⚠ Ideogram allows only photo OR art_style — only photo will be applied to the builder."
             : "";
         }
-        updatePreview();
+
+        // One category block (chips + editable field), wired to node._wiz[cat.key].
+        function buildCatBlock(cat) {
+          const block = document.createElement("div"); block.className = "ai2go-wiz-cat";
+          const lbl = document.createElement("div"); lbl.className = "ai2go-wiz-catlbl"; lbl.textContent = cat.label;
+          const chipsWrap = document.createElement("div"); chipsWrap.className = "ai2go-wiz-chips";
+          const input = document.createElement("input");
+          input.className = "ai2go-wiz-input"; input.type = "text";
+          input.placeholder = "click chips above, or type your own (comma-separated)";
+          input.value = node._wiz[cat.key] || "";
+
+          const chipEls = (cat.chips || []).map((term) => {
+            const c = document.createElement("button");
+            c.className = "ai2go-wiz-chip"; c.textContent = term; c.title = term;
+            c.addEventListener("click", () => {
+              node._wiz[cat.key] = toggleTerm(node._wiz[cat.key], term);
+              input.value = node._wiz[cat.key];
+              syncChips(); persist(); updatePreview();
+            });
+            return { term, el: c };
+          });
+          chipEls.forEach((c) => chipsWrap.appendChild(c.el));
+
+          input.addEventListener("input", () => {
+            node._wiz[cat.key] = input.value;   // keep raw while typing; normalized on chip-toggle/apply
+            syncChips(); persist(); updatePreview();
+          });
+
+          function syncChips() { for (const c of chipEls) c.el.classList.toggle("active", hasTerm(node._wiz[cat.key], c.term)); }
+          function syncCat() { input.value = node._wiz[cat.key] || ""; syncChips(); }
+          syncChips();
+          refreshers.push(syncCat);
+
+          block.append(lbl, chipsWrap, input);
+          return block;
+        }
+
+        // Warning banner for a missing / malformed preset file, with a "Restore defaults" button.
+        function buildBanner(state) {
+          const path = "user/default/ai2go/ideogram4/WizardStylesDefault.json";
+          const banner = document.createElement("div"); banner.className = "ai2go-wiz-banner";
+          const msg = document.createElement("div"); msg.className = "ai2go-wiz-banner-msg";
+          if (state === "missing") {
+            msg.innerHTML = "⚠ Style preset file not found — using built-in defaults. Click <b>Restore defaults</b> " +
+              "to create <code>" + path + "</code>, then edit it to add or replace chips.";
+          } else {
+            msg.innerHTML = "⚠ Style preset file is malformed — using built-in defaults. Fix the JSON in " +
+              "<code>" + path + "</code>, or click <b>Restore defaults</b> to overwrite it with the defaults.";
+          }
+          const restoreBtn = document.createElement("button");
+          restoreBtn.className = "ai2go-wiz-btn"; restoreBtn.textContent = "Restore defaults";
+          restoreBtn.title = "Write the built-in default styles to " + path;
+          restoreBtn.addEventListener("click", async () => {
+            restoreBtn.disabled = true;
+            try { await saveDefaultPresets(); }
+            catch (e) { window.alert("Couldn't write the preset file to the server."); restoreBtn.disabled = false; return; }
+            const reloaded = await loadCategories();
+            renderBody(reloaded.cats, reloaded.state);
+          });
+          banner.append(msg, restoreBtn);
+          return banner;
+        }
+
+        // (Re)fill the body from a category list + load state; safe to call again after a restore.
+        function renderBody(cats, state) {
+          body.innerHTML = "";
+          refreshers.length = 0;
+          if (state !== "ok") body.appendChild(buildBanner(state));
+          for (const cat of cats) body.appendChild(buildCatBlock(cat));
+          updatePreview();
+        }
+
+        renderBody(loaded.cats, loaded.state);
 
         clearBtn.addEventListener("click", () => {
           node._wiz = BLANK();

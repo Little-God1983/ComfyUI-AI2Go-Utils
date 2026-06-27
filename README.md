@@ -99,6 +99,12 @@ A "click-together" helper for the **style fields** of an Ideogram 4 caption — 
   bounding boxes, color palette, and `high_level_description` are left untouched. The node emits an
   empty string at run time, so the wire into `import_json` never overwrites the builder's regions.
 
+**Editable chip presets.** The chip lists are read from
+`ComfyUI/user/default/ai2go/ideogram4/WizardStylesDefault.json` — edit it to add, reorder, or replace
+chips (each entry's `key` must be one of `aesthetics`, `lighting`, `medium`, `photo`, `art_style`). If
+the file is **missing or malformed**, the wizard falls back to the built-in defaults and shows a
+warning with a **Restore defaults** button that (re)creates the file for you.
+
 ## Credits & License
 
 Licensed under **GPL-3.0** — see [LICENSE](LICENSE).
