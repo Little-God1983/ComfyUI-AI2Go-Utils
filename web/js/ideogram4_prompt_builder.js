@@ -3428,6 +3428,7 @@ app.registerExtension({
         const p = node.properties;
         o.ideo = { boxes: node._boxes, palette: node._stylePalette, importMode: findW("import_mode")?.value,
           outputFormat: findW("output_format")?.value, coordMode: findW("coord_mode")?.value, bboxOrder: findW("bbox_order")?.value,
+          res: { mode: modeWidget?.value, ar: arWidget?.value, mp: mpWidget?.value },   // name-keyed so a future widget-order change can't mis-restore these
           dock: { pinned: p.dockPinned, graph: p.dockGraph, rect: p.dockRect, panelH: node._panelH, min: p.dockMin,
             exposeParent: p.exposeToParent, parent: p.dockParent } };
       });
@@ -3503,6 +3504,20 @@ app.registerExtension({
         boxOpacSlider.value = node.properties.boxOpacity == null ? 14 : node.properties.boxOpacity;
         if (node.properties.explorerW) explorerEl.style.width = node.properties.explorerW + "px";
         applyExplorerCollapsed(!!node.properties.explorerCollapsed);
+        // Heal the resolution widgets. Prefer the name-keyed blob (order-independent); then coerce any
+        // junk that ComfyUI's positional widgets_values restore can leave behind when loading a workflow
+        // saved by an older build with a different widget order (old images would otherwise show NaN).
+        const _res = o && o.ideo && o.ideo.res;
+        if (_res) {
+          if (modeWidget && _res.mode != null) modeWidget.value = _res.mode;
+          if (arWidget && _res.ar != null) arWidget.value = _res.ar;
+          if (mpWidget && _res.mp != null) mpWidget.value = _res.mp;
+        }
+        if (modeWidget && !["raw", "auto", "megapixel"].includes(modeWidget.value)) modeWidget.value = "raw";
+        if (arWidget && !/^\d+:\d+$/.test(String(arWidget.value))) arWidget.value = "1:1";
+        if (mpWidget) { const m = parseFloat(mpWidget.value); mpWidget.value = (isFinite(m) && m > 0) ? m : 1.0; }
+        if (wWidget) { const v = parseInt(wWidget.value, 10); if (!isFinite(v) || v <= 0) wWidget.value = 1024; }
+        if (hWidget) { const v = parseInt(hWidget.value, 10); if (!isFinite(v) || v <= 0) hWidget.value = 1024; }
         applyResolutionMode();                                // restore mode visibility + reflect saved dims on the canvas
         syncCanvasToDims();
         rebuildStylePalette();
