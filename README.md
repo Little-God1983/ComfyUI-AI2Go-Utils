@@ -79,7 +79,7 @@ scene-graph **Overview**, region **parenting**, and named **groups** layered on 
 
 - **Copy** / **Paste** the caption JSON, and save/load named **Templates** (stored server-side).
   Each template can carry an optional **preview image** — click 📷 in the Templates menu to pick one
-  (it's center-cropped to a 100×100 webp), or just drop a matching `<template-name>.{webp,png,jpg,jpeg}`
+  (it's center-cropped to a 200×200 webp), or just drop a matching `<template-name>.{webp,png,jpg,jpeg}`
   next to the template file and it's picked up automatically.
 - Copies carry a small `_ai2go` sidecar that preserves the full layout (groups + hierarchy) for a
   **lossless AI2Go → AI2Go** round-trip, while staying **two-way compatible with ComfyUI-KJNodes**:

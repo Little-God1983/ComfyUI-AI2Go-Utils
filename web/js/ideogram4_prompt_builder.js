@@ -108,7 +108,7 @@ async function deleteTemplate(name) {
 // in the same dir. The user can add one through the UI (📷 → cropped to a PREVIEW_PX
 // square, encoded webp) OR just drop an image next to the template with a matching name;
 // either way it's picked up automatically. Previews are always optional.
-const PREVIEW_PX = 100;                                   // stored preview is a PREVIEW_PX² square
+const PREVIEW_PX = 200;                                   // stored preview is a PREVIEW_PX² square
 const TPL_IMG_EXTS = ["webp", "png", "jpg", "jpeg"];      // recognized preview extensions (webp is what we write)
 const tplImg = (name, ext) => `${TPL_DIR}/${name}.${ext}`;
 
@@ -487,10 +487,10 @@ function injectStyle() {
     .ai2go-ideo-bglbl { color:#888; font:11px sans-serif; flex:0 0 auto; min-width:62px; }
     .ai2go-ideo-trow { padding:2px 4px; border-radius:4px; }
     .ai2go-ideo-trow:hover { background:#333; }
-    .ai2go-ideo-tplthumb { width:40px; height:40px; flex:0 0 auto; border-radius:4px; border:1px solid #555; background:#1a1a1a; overflow:hidden; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+    .ai2go-ideo-tplthumb { width:72px; height:72px; flex:0 0 auto; border-radius:4px; border:1px solid #555; background:#1a1a1a; overflow:hidden; display:flex; align-items:center; justify-content:center; cursor:pointer; }
     .ai2go-ideo-tplthumb img { width:100%; height:100%; object-fit:cover; display:block; }
     .ai2go-ideo-tplthumb.empty { border-style:dashed; border-color:#444; }
-    .ai2go-ideo-tplthumb.empty::after { content:"🖼"; opacity:.25; font-size:18px; }
+    .ai2go-ideo-tplthumb.empty::after { content:"🖼"; opacity:.25; font-size:30px; }
     .ai2go-ideo-dragpill { position:fixed; z-index:11000; pointer-events:none; background:#2a3a42; color:#cfe8f5; border:1px solid #46b4e6; border-radius:5px; padding:2px 8px; font:11px sans-serif; box-shadow:0 4px 14px rgba(0,0,0,0.5); white-space:nowrap; }
     .ai2go-ideo-cvrow { display:flex; flex:1 1 auto; min-height:60px; gap:4px; overflow:hidden; }
     .ai2go-ideo-explorer { flex:0 0 auto; display:flex; flex-direction:column; background:#202020; border:1px solid #333; border-radius:4px; overflow:hidden; min-width:0; }
