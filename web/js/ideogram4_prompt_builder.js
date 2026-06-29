@@ -103,6 +103,79 @@ async function deleteTemplate(name) {
   try { await app.api.deleteUserData(tplFile(name)); } catch (e) {}
 }
 
+// ── Optional preview images for templates ──────────────────────────────────
+// A template "<name>.json" may have a sibling preview image "<name>.{webp,png,jpg,jpeg}"
+// in the same dir. The user can add one through the UI (📷 → cropped to a PREVIEW_PX
+// square, encoded webp) OR just drop an image next to the template with a matching name;
+// either way it's picked up automatically. Previews are always optional.
+const PREVIEW_PX = 100;                                   // stored preview is a PREVIEW_PX² square
+const TPL_IMG_EXTS = ["webp", "png", "jpg", "jpeg"];      // recognized preview extensions (webp is what we write)
+const tplImg = (name, ext) => `${TPL_DIR}/${name}.${ext}`;
+
+// One dir read → the sorted template names plus a { name → preview-filename } map.
+async function listTemplateInfo() {
+  let files = [];
+  try {
+    const items = await app.api.listUserDataFullInfo(TPL_DIR);
+    files = items.map((it) => it.path.split(/[\\/]/).pop() || "").filter(Boolean);
+  } catch (e) {}
+  const names = files.filter((f) => /\.json$/i.test(f))
+    .map((f) => f.replace(/\.json$/i, "")).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  const previews = {};
+  for (const f of files) {
+    const m = f.match(/^(.+)\.(webp|png|jpe?g)$/i);       // greedy → base is everything before the last dot
+    if (m && (!previews[m[1]] || /\.webp$/i.test(f))) previews[m[1]] = f;   // prefer the webp we author
+  }
+  return { names, previews };
+}
+
+// Fetch a preview file and return a freshly-minted object URL (caller must revoke), or null.
+async function loadPreviewUrl(file) {
+  try {
+    const r = await app.api.getUserData(`${TPL_DIR}/${file}`);
+    if (r.status !== 200) return null;
+    const buf = await r.blob();
+    const ext = (file.split(".").pop() || "").toLowerCase();
+    const type = ext === "png" ? "image/png" : (ext === "jpg" || ext === "jpeg") ? "image/jpeg" : "image/webp";
+    return URL.createObjectURL(new Blob([buf], { type }));   // re-tag so <img> always decodes it regardless of how the server served it
+  } catch (e) { return null; }
+}
+
+// Center-crop a picked image File to a square, scale to PREVIEW_PX, encode compressed webp.
+function fileToPreviewBlob(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const side = Math.min(img.naturalWidth, img.naturalHeight);   // largest centered square that fits
+      const sx = (img.naturalWidth - side) / 2, sy = (img.naturalHeight - side) / 2;
+      const cv = document.createElement("canvas");
+      cv.width = cv.height = PREVIEW_PX;
+      const ctx = cv.getContext("2d");
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, sx, sy, side, side, 0, 0, PREVIEW_PX, PREVIEW_PX);
+      cv.toBlob((b) => (b ? resolve(b) : reject(new Error("encode failed"))), "image/webp", 0.8);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("not an image")); };
+    img.src = url;
+  });
+}
+
+// Crop+encode the File and store it as "<name>.webp"; drop any stale non-webp variant.
+async function savePreview(name, file) {
+  try {
+    const blob = await fileToPreviewBlob(file);
+    await app.api.storeUserData(tplImg(name, "webp"), blob, { overwrite: true, stringify: false, throwOnError: true });
+    await deleteTemplatePreviews(name, ["png", "jpg", "jpeg"]);   // the webp now supersedes a dropped raster
+    return true;
+  } catch (e) { window.alert("Couldn't save the preview image."); return false; }
+}
+
+async function deleteTemplatePreviews(name, exts = TPL_IMG_EXTS) {
+  for (const ext of exts) { try { await app.api.deleteUserData(tplImg(name, ext)); } catch (e) {} }
+}
+
 // Parse a #rrggbb hex into {r,g,b}, or null if malformed.
 function hexRgb(hex) {
   const h = (hex || "").replace("#", "");
@@ -414,6 +487,10 @@ function injectStyle() {
     .ai2go-ideo-bglbl { color:#888; font:11px sans-serif; flex:0 0 auto; min-width:62px; }
     .ai2go-ideo-trow { padding:2px 4px; border-radius:4px; }
     .ai2go-ideo-trow:hover { background:#333; }
+    .ai2go-ideo-tplthumb { width:40px; height:40px; flex:0 0 auto; border-radius:4px; border:1px solid #555; background:#1a1a1a; overflow:hidden; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+    .ai2go-ideo-tplthumb img { width:100%; height:100%; object-fit:cover; display:block; }
+    .ai2go-ideo-tplthumb.empty { border-style:dashed; border-color:#444; }
+    .ai2go-ideo-tplthumb.empty::after { content:"🖼"; opacity:.25; font-size:18px; }
     .ai2go-ideo-dragpill { position:fixed; z-index:11000; pointer-events:none; background:#2a3a42; color:#cfe8f5; border:1px solid #46b4e6; border-radius:5px; padding:2px 8px; font:11px sans-serif; box-shadow:0 4px 14px rgba(0,0,0,0.5); white-space:nowrap; }
     .ai2go-ideo-cvrow { display:flex; flex:1 1 auto; min-height:60px; gap:4px; overflow:hidden; }
     .ai2go-ideo-explorer { flex:0 0 auto; display:flex; flex-direction:column; background:#202020; border:1px solid #333; border-radius:4px; overflow:hidden; min-width:0; }
@@ -705,7 +782,7 @@ app.registerExtension({
       // ── Templates popup: save/load named caption JSONs (server-side userdata) ──
       const tplBtn = document.createElement("button");
       tplBtn.className = "ai2go-ideo-btn"; tplBtn.textContent = "Templates ▾";
-      tplBtn.title = "Save / load the caption JSON as templates (stored on the server ComfyUI\\user\\default\\ai2go\\ideogram4)";
+      tplBtn.title = "Save / load the caption JSON as templates, each with an optional preview image (stored on the server ComfyUI\\user\\default\\ai2go\\ideogram4)";
       stopProp(tplBtn);
       const tplMenu = document.createElement("div");
       tplMenu.className = "ai2go-ideo-menu ai2go-ideo-bgmenu";
@@ -714,7 +791,23 @@ app.registerExtension({
       node._tplMenu = tplMenu;
       const tplDismiss = outsideDismiss(tplMenu, () => closeTplMenu(), tplBtn);
       function closeTplMenu() { tplMenu.style.display = "none"; tplDismiss.disarm(); }
+      // Opens a file picker, crops+stores the chosen image as the template's webp preview, then refreshes.
+      function pickPreview(name) {
+        const inp = document.createElement("input");
+        inp.type = "file"; inp.accept = "image/png,image/jpeg,image/webp"; inp.style.display = "none";
+        document.body.appendChild(inp);
+        inp.addEventListener("change", async () => {
+          const file = inp.files && inp.files[0];
+          inp.remove();
+          if (file && await savePreview(name, file)) buildTplMenu();
+        });
+        inp.addEventListener("cancel", () => inp.remove());   // dialog dismissed → don't leave the input attached
+        inp.click();
+      }
       async function buildTplMenu() {
+        (tplMenu._urls || []).forEach((u) => URL.revokeObjectURL(u));   // release the previous build's preview blobs
+        tplMenu._urls = [];
+        const gen = (tplMenu._gen = (tplMenu._gen || 0) + 1);           // cancels async preview loads from an older build
         tplMenu.innerHTML = "";
         const saveRow = document.createElement("div"); saveRow.className = "ai2go-ideo-bgrow";
         const saveBtn = document.createElement("button"); saveBtn.className = "ai2go-ideo-btn"; saveBtn.textContent = "+ Save as…";
@@ -726,24 +819,43 @@ app.registerExtension({
           if (await saveTemplate(name, buildClipboardCaption())) buildTplMenu();
         });
         saveRow.appendChild(saveBtn); tplMenu.appendChild(saveRow);
-        const names = await listTemplateNames();
+        const { names, previews } = await listTemplateInfo();
+        if (gen !== tplMenu._gen) return;                 // a newer build started while we awaited the listing
         if (!names.length) {
           const empty = document.createElement("div"); empty.className = "ai2go-ideo-mhdr"; empty.textContent = "No templates saved.";
           tplMenu.appendChild(empty);
         }
         for (const name of names) {
           const row = document.createElement("div"); row.className = "ai2go-ideo-bgrow ai2go-ideo-trow";
+          const hasPreview = !!previews[name];
+          const thumb = document.createElement("div");
+          thumb.className = "ai2go-ideo-tplthumb" + (hasPreview ? "" : " empty");
+          thumb.title = hasPreview ? "Load " + name + " (replaces everything)" : "No preview — click 📷 to add one";
+          if (hasPreview) {
+            const img = document.createElement("img");
+            thumb.appendChild(img);
+            loadPreviewUrl(previews[name]).then((url) => {
+              if (!url) return;
+              if (gen !== tplMenu._gen || !img.isConnected) { URL.revokeObjectURL(url); return; }   // menu rebuilt under us
+              tplMenu._urls.push(url); img.src = url;
+            });
+          }
           const txt = document.createElement("span");
           txt.className = "ai2go-ideo-ltext"; txt.style.cssText = "flex:1 1 auto;cursor:pointer;"; txt.textContent = name; txt.title = "Load " + name + " (replaces everything)";
+          const pic = document.createElement("button"); pic.className = "ai2go-ideo-lbtn"; pic.textContent = "📷";
+          pic.title = (hasPreview ? "Replace" : "Add a") + ` preview image (cropped to ${PREVIEW_PX}×${PREVIEW_PX})`;
           const ins = document.createElement("button"); ins.className = "ai2go-ideo-lbtn"; ins.textContent = "⊞"; ins.title = "Insert this template's boxes only into the current canvas";
           const upd = document.createElement("button"); upd.className = "ai2go-ideo-lbtn"; upd.textContent = "⤓"; upd.title = "Save current (overwrite)";
           const del = document.createElement("button"); del.className = "ai2go-ideo-lbtn del"; del.textContent = "✕"; del.title = "Delete template";
-          row.append(txt, ins, upd, del); tplMenu.appendChild(row);
-          txt.addEventListener("click", async () => {
+          row.append(thumb, txt, pic, ins, upd, del); tplMenu.appendChild(row);
+          const loadIt = async () => {
             const cap = tryParseCaption(await loadTemplate(name));
             if (!cap) { window.alert("That template isn't a valid caption JSON."); return; }
             loadCaption(cap); closeTplMenu();
-          });
+          };
+          txt.addEventListener("click", loadIt);
+          thumb.addEventListener("click", loadIt);
+          pic.addEventListener("click", (e) => { e.stopPropagation(); pickPreview(name); });
           ins.addEventListener("click", async (e) => {
             e.stopPropagation();
             const cap = tryParseCaption(await loadTemplate(name));
@@ -757,7 +869,7 @@ app.registerExtension({
           del.addEventListener("click", async (e) => {
             e.stopPropagation();
             if (!window.confirm(`Delete template "${name}"?`)) return;
-            await deleteTemplate(name); buildTplMenu();
+            await deleteTemplate(name); await deleteTemplatePreviews(name); buildTplMenu();
           });
         }
       }
