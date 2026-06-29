@@ -327,15 +327,6 @@ Toolbar:
 - Grab BG / Clear BG: use the last generated image as the background
 - brightness slider, token estimate, and Copy / Paste / Clear all""",
             inputs=[
-                io.Combo.Input("resolution_mode", options=["raw", "auto", "megapixel"], default="raw",
-                               tooltip="How width/height are set: 'raw' = type them freely (current behavior); "
-                                       "'auto' = pick an aspect ratio, edit either side and the other follows; "
-                                       "'megapixel' = pick a target megapixels + aspect ratio and both are computed. "
-                                       "auto/megapixel snap to Ideogram 4's supported 256-2048 px, multiples of 16."),
-                io.Combo.Input("aspect_ratio", options=ASPECT_PRESETS, default="1:1",
-                               tooltip="Target aspect ratio (W:H) used in 'auto' and 'megapixel' modes. Ignored in 'raw' mode."),
-                io.Float.Input("megapixels", default=1.0, min=0.1, max=4.2, step=0.1,
-                               tooltip="Target image size in megapixels for 'megapixel' mode (2048x2048 ~= 4.19 MP). Ignored otherwise."),
                 io.Int.Input("width", default=1024, min=64, max=16384, step=16,
                              tooltip="Canvas aspect width (also the pixel grid the bbox is measured in). Ideogram 4 needs multiples of 16. "
                                      "Free in 'raw' mode; computed in 'auto'/'megapixel' modes."),
@@ -387,6 +378,18 @@ Toolbar:
                 io.BoundingBox.Input("bboxes", optional=True, force_input=True,
                                      tooltip="Optional pixel-space boxes ({x, y, width, height}) used to seed the "
                                              "editor's regions when it has none. Ignored once regions exist."),
+                # Resolution selector — defined LAST so the widget order matches old saved workflows
+                # positionally (ComfyUI restores widgets_values by index; inserting earlier would shift
+                # every existing widget and corrupt old workflows). The editor JS finds these by name.
+                io.Combo.Input("resolution_mode", options=["raw", "auto", "megapixel"], default="raw",
+                               tooltip="How width/height are set: 'raw' = type them freely (current behavior); "
+                                       "'auto' = pick an aspect ratio, edit either side and the other follows; "
+                                       "'megapixel' = pick a target megapixels + aspect ratio and both are computed. "
+                                       "auto/megapixel snap to Ideogram 4's supported 256-2048 px, multiples of 16."),
+                io.Combo.Input("aspect_ratio", options=ASPECT_PRESETS, default="1:1",
+                               tooltip="Target aspect ratio (W:H) used in 'auto' and 'megapixel' modes. Ignored in 'raw' mode."),
+                io.Float.Input("megapixels", default=1.0, min=0.1, max=4.2, step=0.1,
+                               tooltip="Target image size in megapixels for 'megapixel' mode (2048x2048 ~= 4.19 MP). Ignored otherwise."),
             ],
             outputs=[
                 io.String.Output(display_name="prompt"),
