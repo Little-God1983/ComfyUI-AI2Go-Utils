@@ -250,6 +250,44 @@ def _caption_to_boxes(cap):
     return boxes
 
 
+# ── Resolution selector ──────────────────────────────────────────────────────
+# Aspect presets as "W:H" strings (parsed by both this module and the editor JS).
+# Grouped landscape → square → portrait for the dropdown.
+ASPECT_PRESETS = ["1:1", "3:2", "4:3", "16:9", "16:10", "5:4", "2:1", "3:1",
+                  "2:3", "3:4", "9:16", "10:16", "4:5", "1:2", "1:3"]
+RES_MIN, RES_MAX = 256, 2048   # Ideogram 4's supported per-side range
+
+
+def _parse_ar(s):
+    # "W:H" -> width/height ratio (float); 1.0 on anything malformed.
+    try:
+        a, b = str(s).split(":")
+        a, b = float(a), float(b)
+        return a / b if b else 1.0
+    except Exception:
+        return 1.0
+
+
+def _clamp16(v, lo=RES_MIN, hi=RES_MAX):
+    # Snap to a multiple of 16 and clamp into [lo, hi] (Ideogram 4 needs multiples of 16).
+    return int(min(hi, max(lo, round(v / 16) * 16)))
+
+
+def _resolve_dims(mode, aspect, mp, width, height):
+    # Mirror of the editor JS math so width/height are correct even on headless/API runs.
+    # raw: pass through unchanged. auto: width is primary, height derived from the ratio.
+    # megapixel: derive both from the megapixel target + ratio. auto/megapixel clamp to 256-2048 x16.
+    if mode == "auto":
+        w = _clamp16(width)
+        return w, _clamp16(w / _parse_ar(aspect))
+    if mode == "megapixel":
+        total = max(0.0, float(mp)) * 1_000_000.0
+        ar = _parse_ar(aspect)
+        w = _clamp16((total * ar) ** 0.5)
+        return w, _clamp16(total / w if w else (total / ar) ** 0.5)
+    return int(width), int(height)
+
+
 class AI2GoIdeogram4PromptBuilder(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -289,10 +327,21 @@ Toolbar:
 - Grab BG / Clear BG: use the last generated image as the background
 - brightness slider, token estimate, and Copy / Paste / Clear all""",
             inputs=[
+                io.Combo.Input("resolution_mode", options=["raw", "auto", "megapixel"], default="raw",
+                               tooltip="How width/height are set: 'raw' = type them freely (current behavior); "
+                                       "'auto' = pick an aspect ratio, edit either side and the other follows; "
+                                       "'megapixel' = pick a target megapixels + aspect ratio and both are computed. "
+                                       "auto/megapixel snap to Ideogram 4's supported 256-2048 px, multiples of 16."),
+                io.Combo.Input("aspect_ratio", options=ASPECT_PRESETS, default="1:1",
+                               tooltip="Target aspect ratio (W:H) used in 'auto' and 'megapixel' modes. Ignored in 'raw' mode."),
+                io.Float.Input("megapixels", default=1.0, min=0.1, max=4.2, step=0.1,
+                               tooltip="Target image size in megapixels for 'megapixel' mode (2048x2048 ~= 4.19 MP). Ignored otherwise."),
                 io.Int.Input("width", default=1024, min=64, max=16384, step=16,
-                             tooltip="Canvas aspect width (also the pixel grid the bbox is measured in). Ideogram 4 needs multiples of 16."),
+                             tooltip="Canvas aspect width (also the pixel grid the bbox is measured in). Ideogram 4 needs multiples of 16. "
+                                     "Free in 'raw' mode; computed in 'auto'/'megapixel' modes."),
                 io.Int.Input("height", default=1024, min=64, max=16384, step=16,
-                             tooltip="Canvas aspect height (also the pixel grid the bbox is measured in). Ideogram 4 needs multiples of 16."),
+                             tooltip="Canvas aspect height (also the pixel grid the bbox is measured in). Ideogram 4 needs multiples of 16. "
+                                     "Free in 'raw' mode; computed in 'auto'/'megapixel' modes."),
                 io.String.Input("high_level_description", multiline=True, default="",
                                 tooltip="Optional one-line overview of the whole image (blank = omitted)."),
                 io.String.Input("background", multiline=True, default="",
@@ -351,11 +400,15 @@ Toolbar:
 
     @classmethod
     def execute(cls, width, height, background, style,
+                resolution_mode="raw", aspect_ratio="1:1", megapixels=1.0,
                 high_level_description="", aesthetics="", lighting="", medium="",
                 style_palette_data="", elements_data="", import_json="", import_mode="when empty",
                 output_format="pretty", coord_mode="normalized", bbox_order="yx", bboxes=None, image=None, bg_brightness=25) -> io.NodeOutput:
         if import_mode not in ("when empty", "always"):      # old workflows saved before this widget existed
             import_mode = "when empty"
+        # Resolve the final pixel dims per the resolution selector; everything below (canvas grid,
+        # absolute bbox scale, preview, width/height outputs, ui dims) uses these.
+        width, height = _resolve_dims(resolution_mode, aspect_ratio, megapixels, width, height)
         dump = _dumps if output_format == "pretty" else (lambda v: json.dumps(v, ensure_ascii=False, separators=(",", ":")))
         # bbox scale: 0-1000 grid (Ideogram-standard) or absolute pixels (width/height) when coord_mode=="absolute".
         # bbox axis order: "yx" (Ideogram) or "xy" (Qwen/standard x1,y1,x2,y2).

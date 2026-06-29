@@ -532,6 +532,74 @@ app.registerExtension({
       const orderWidget = findW("bbox_order");               // "yx" (Ideogram) | "xy" (Qwen/standard) (set via the toolbar)
       if (bgBrightnessWidget && typeof bgBrightnessWidget.value !== "number") bgBrightnessWidget.value = 25;
       const wWidget = findW("width"), hWidget = findW("height");
+
+      // ── Resolution selector (raw / auto / megapixel) ──
+      // The bottom canvas derives its aspect purely from the width/height widgets (see fitCanvas),
+      // so every mode just computes new width/height, writes those widgets, and re-fits — no new
+      // canvas code. width/height stay the single source of truth for the canvas AND the outputs.
+      const modeWidget = findW("resolution_mode"), arWidget = findW("aspect_ratio"), mpWidget = findW("megapixels");
+      const RES_MIN = 256, RES_MAX = 2048;                    // Ideogram 4's supported per-side range
+      const clamp16 = (v) => Math.min(RES_MAX, Math.max(RES_MIN, Math.round(v / 16) * 16));
+      const parseAR = (s) => { const m = /^(\d+):(\d+)$/.exec(s || ""); return m ? (+m[1]) / (+m[2]) : 1; };
+      const resMode = () => (modeWidget ? modeWidget.value : "raw");
+      // Toggle a native widget's visibility while keeping it serializable (same hidden+computeSize
+      // trick as hideDataWidgets); the original computeSize is saved on first hide and restored on show.
+      function setWidgetVisible(w, vis) {
+        if (!w) return;
+        if (!vis) {
+          if (!w._resHidden) { w._resPrevCompute = w.computeSize; w._resHidden = true; }
+          w.hidden = true;
+          w.computeSize = () => [0, -4];
+        } else if (w._resHidden) {
+          w.hidden = false;
+          w.computeSize = w._resPrevCompute;                  // may be undefined → ComfyUI default sizing
+          w._resHidden = false;
+        }
+      }
+      // Recompute width/height for the active mode. `driver` = the side the user just edited in auto
+      // mode ("w" | "h"). Re-entrancy guarded so writing one widget can't loop back through the other.
+      function recalcDims(driver) {
+        if (node._resCalc) return;
+        const mode = resMode();
+        if (mode === "raw" || !wWidget || !hWidget) return;
+        node._resCalc = true;
+        try {
+          const ar = parseAR(arWidget ? arWidget.value : "1:1");
+          if (mode === "megapixel") {
+            const total = Math.max(0, parseFloat(mpWidget ? mpWidget.value : 1) || 0) * 1e6;
+            const w = clamp16(Math.sqrt(total * ar));
+            wWidget.value = w;
+            hWidget.value = clamp16(w ? total / w : Math.sqrt(total / ar));
+          } else if (driver === "h") {                        // auto, height edited → derive width
+            const h = clamp16(hWidget.value);
+            hWidget.value = h;
+            wWidget.value = clamp16(h * ar);
+          } else {                                            // auto, width edited or ratio changed → derive height
+            const w = clamp16(wWidget.value);
+            wWidget.value = w;
+            hWidget.value = clamp16(w / ar);
+          }
+        } finally { node._resCalc = false; }
+      }
+      function updateResReadout() {
+        if (!resReadout) return;
+        const mp = resMode() === "megapixel";
+        resReadout.style.display = mp ? "" : "none";
+        if (mp) resReadout.textContent = `${wWidget ? wWidget.value : 0} × ${hWidget ? hWidget.value : 0}`;
+      }
+      // Apply the current mode: show/hide the mode-relevant widgets, recompute dims, refit the canvas.
+      function applyResolutionMode() {
+        const mode = resMode();
+        setWidgetVisible(arWidget, mode !== "raw");
+        setWidgetVisible(mpWidget, mode === "megapixel");
+        setWidgetVisible(wWidget, mode !== "megapixel");
+        setWidgetVisible(hWidget, mode !== "megapixel");
+        recalcDims("w");
+        updateResReadout();
+        if (node.graph) node.graph.setDirtyCanvas(true, true);
+        syncCanvasToDims(); drawCanvas(); fitCanvas();
+      }
+
       // Hide the data widgets while keeping them serializable.
       function hideDataWidgets() {
         for (const w of [elementsWidget, stylePaletteWidget, bgBrightnessWidget, formatWidget, coordWidget, orderWidget]) {
@@ -593,6 +661,10 @@ app.registerExtension({
       const tokenSpan = document.createElement("span");
       tokenSpan.style.cssText = "color:#888; white-space:nowrap;";
       tokenSpan.title = "Rough token estimate (~chars/4). Grey <256, green healthy, orange nearing, red ≥2048 (model cap — will error)";
+      // Resolved W×H readout, shown only in megapixel mode (where width/height widgets are hidden).
+      const resReadout = document.createElement("span");
+      resReadout.style.cssText = "color:#46b4e6; white-space:nowrap; display:none;";
+      resReadout.title = "Computed resolution (megapixel mode) — snapped to multiples of 16, clamped 256–2048";
       // Output-settings dropdown (formatting + bbox coordinate space/order) — writes the hidden widgets.
       const outBtn = document.createElement("button");
       outBtn.className = "ai2go-ideo-btn"; outBtn.textContent = "Output ▾";
@@ -894,7 +966,7 @@ app.registerExtension({
       }
       groupsBtn.addEventListener("click", () => { node.properties.showGroups = (node.properties.showGroups === false); syncGroupsBtn(); drawCanvas(); flushChange(); });
       syncGroupsBtn();
-      bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(outBtn); bar.appendChild(bgBtn); bar.appendChild(txtBtn); bar.appendChild(groupsBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(clearCanvasBtn); bar.appendChild(clearBtn);
+      bar.appendChild(hint); bar.appendChild(resReadout); bar.appendChild(tokenSpan); bar.appendChild(outBtn); bar.appendChild(bgBtn); bar.appendChild(txtBtn); bar.appendChild(groupsBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(clearCanvasBtn); bar.appendChild(clearBtn);
       updateGrabBtn();
 
       // Persistent global style-palette row
@@ -3235,11 +3307,20 @@ app.registerExtension({
         }
       }
 
-      // ── width/height widget callbacks ──
-      for (const w of [wWidget, hWidget]) {
-        if (!w) continue;
-        chainCallback(w, "callback", () => { syncCanvasToDims(); drawCanvas(); fitCanvas(); updateTokens(); });  // absolute coords depend on w/h
-      }
+      // ── resolution selector + width/height widget callbacks ──
+      // Mode switch: re-layout the visible controls and recompute. Aspect/megapixel: recompute dims.
+      if (modeWidget) chainCallback(modeWidget, "callback", () => { applyResolutionMode(); updateTokens(); });
+      if (arWidget) chainCallback(arWidget, "callback", () => {
+        if (resMode() === "raw") return;
+        recalcDims("w"); updateResReadout(); syncCanvasToDims(); drawCanvas(); fitCanvas(); updateTokens();
+      });
+      if (mpWidget) chainCallback(mpWidget, "callback", () => {
+        if (resMode() !== "megapixel") return;
+        recalcDims(); updateResReadout(); syncCanvasToDims(); drawCanvas(); fitCanvas(); updateTokens();
+      });
+      // In auto mode, editing one side derives the other; in raw mode they're free. (absolute coords depend on w/h)
+      if (wWidget) chainCallback(wWidget, "callback", () => { if (!node._resCalc && resMode() === "auto") recalcDims("w"); syncCanvasToDims(); drawCanvas(); fitCanvas(); updateTokens(); });
+      if (hWidget) chainCallback(hWidget, "callback", () => { if (!node._resCalc && resMode() === "auto") recalcDims("h"); syncCanvasToDims(); drawCanvas(); fitCanvas(); updateTokens(); });
       // Update the token estimate when the caption-level text widgets change.
       for (const name of ["background", "high_level_description", "aesthetics", "lighting", "medium", "style"]) {
         const w = findW(name);
@@ -3422,6 +3503,7 @@ app.registerExtension({
         boxOpacSlider.value = node.properties.boxOpacity == null ? 14 : node.properties.boxOpacity;
         if (node.properties.explorerW) explorerEl.style.width = node.properties.explorerW + "px";
         applyExplorerCollapsed(!!node.properties.explorerCollapsed);
+        applyResolutionMode();                                // restore mode visibility + reflect saved dims on the canvas
         syncCanvasToDims();
         rebuildStylePalette();
         renderPanel();
@@ -3439,6 +3521,7 @@ app.registerExtension({
       // ComfyUI restored (touching it was the "height resets on reload/copy-paste" bug); only nudge a default width.
       setTimeout(() => {
         hideDataWidgets();
+        applyResolutionMode();                                // fresh node: hide aspect/megapixel until their mode is picked
         if (!node._configured) node.setSize([Math.max(480, node.size[0]), node.size[1]]);                       // fresh: comfortable default width, keep natural height
         else if (!node._dockGeomRestored) node.setSize([Math.max(380, node.size[0]), node.computeSize()[1]]);  // old workflow: drop the embedded-editor height, shrink to content
         else if (node.size[0] < 380) node.setSize([380, node.size[1]]);                                          // current reload/paste: keep saved size, enforce min width
