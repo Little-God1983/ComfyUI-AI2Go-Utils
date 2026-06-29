@@ -50,18 +50,28 @@ def _snap(v, p):
     return int(min(p["max"], max(p["min"], round(v / m) * m)))
 
 
+def _fit_w(tw, ar, p):
+    # Largest width with aspect `ar` whose width AND height (=width/ar) both fit [min, max], with the
+    # aspect ratio preserved — so hitting the per-side cap keeps the ratio (e.g. 16:9 -> 2048x1152, not
+    # 2048x2048). Aspect is prioritized over hitting an exact target. Snapped to the profile multiple.
+    lo, hi = p["min"], p["max"]
+    wlo, whi = max(lo, lo * ar), min(hi, hi * ar)
+    w = min(hi, max(lo, tw)) if wlo > whi else min(whi, max(wlo, tw))   # wlo>whi: aspect can't fit the range
+    w = _snap(w, p)
+    return w, _snap(w / ar, p)
+
+
 def _resolve_dims(profile, mode, aspect, mp, width, height):
     # Mirror of the editor JS math so the INT outputs are correct even headless / via the API.
     p = _prof(profile)
-    if mode == "auto":
-        w = _snap(width, p)                       # width is primary; height follows the ratio
-        return w, _snap(w / _parse_ar(aspect), p)
+    if mode == "raw":
+        return _snap(width, p), _snap(height, p)  # raw: literal sides, snapped + per-axis clamped
+    ar = _parse_ar(aspect)
     if mode == "megapixel":
-        total = max(0.0, float(mp)) * 1_000_000.0
-        ar = _parse_ar(aspect)
-        w = _snap((total * ar) ** 0.5, p)
-        return w, _snap(total / w if w else (total / ar) ** 0.5, p)
-    return _snap(width, p), _snap(height, p)      # raw: still kept valid for the profile
+        tw = (max(0.0, float(mp)) * 1_000_000.0 * ar) ** 0.5
+    else:                                         # auto: width drives (JS keeps both sides consistent)
+        tw = float(width)
+    return _fit_w(tw, ar, p)                       # aspect preserved when clamped to the cap
 
 
 class AI2GoResolutionSelector(io.ComfyNode):
