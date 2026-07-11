@@ -150,7 +150,9 @@ app.registerExtension({
           if (node?.comfyClass !== NODE_ID && node?.type !== NODE_ID) continue;
           if (node._pbPruneEmpties && findWidget(node, "delete_empty_prompts")?.value) node._pbPruneEmpties();
           const resetW = findWidget(node, "reset_index_at_batch_start");
-          if (!resetW || resetW.value) setIndex(node, 0);
+          // Default-on: reset unless the toggle is explicitly false. A fresh-restore null/undefined
+          // value must NOT be read as "skip reset" (that would leave a null index heading into the run).
+          if (!resetW || resetW.value !== false) setIndex(node, 0);
         }
       } catch (e) {
         console.error("[AI2Go PromptBatch] batch-start index reset failed:", e);
@@ -177,7 +179,15 @@ app.registerExtension({
       // Own the per-run walk: after each queued run, advance the index by 1 (always after
       // serialization, so the run that fired used the pre-increment value).
       const idxW = findWidget(node, "index");
-      if (idxW) idxW.afterQueued = () => setIndex(node, (parseInt(idxW.value, 10) || 0) + 1);
+      if (idxW) {
+        idxW.afterQueued = () => setIndex(node, (parseInt(idxW.value, 10) || 0) + 1);
+        // Guarantee `index` always leaves the front-end as a real non-negative int. On a fresh session
+        // the restored widget value can arrive null/undefined; that serializes as JSON null and makes
+        // ComfyUI's INT validation reject the run ("int() argument … not 'NoneType'"). serializeValue
+        // is graphToPrompt's single serialization point for every queue path, so coercing here sanitizes
+        // both the value sent to Python and the value written back into the saved workflow.
+        idxW.serializeValue = () => { const v = parseInt(idxW.value, 10); return Number.isFinite(v) && v >= 0 ? v : 0; };
+      }
       const delEmptyW = findWidget(node, "delete_empty_prompts");
 
       // ── DOM row editor. editorEl is the widget root (ComfyUI pins its height each frame); the rows
@@ -197,15 +207,30 @@ app.registerExtension({
       // Resize the node to fit the current rows (measured, so no magic row-height constant). We measure
       // contentEl (natural height), NOT editorEl (height pinned by ComfyUI) — otherwise a removed row
       // couldn't shrink the node, because the pinned element keeps its old, larger height.
-      function syncSize() {
-        requestAnimationFrame(() => {
-          const h = Math.max(contentEl.scrollHeight, 8);
-          rowsWidget.computeSize = () => [node.size?.[0] || 320, h + 8];
-          const want = node.computeSize?.();
-          if (want) node.setSize([node.size[0], want[1]]);
-          node.setDirtyCanvas?.(true, true);
-        });
+      function fitToContent() {
+        const h = Math.max(contentEl.scrollHeight, 8);
+        rowsWidget.computeSize = () => [node.size?.[0] || 320, h + 8];
+        const want = node.computeSize?.();
+        if (want) node.setSize([node.size[0], want[1]]);
+        node.setDirtyCanvas?.(true, true);
       }
+      function syncSize() {
+        requestAnimationFrame(fitToContent);
+      }
+
+      // On a fresh page load / UI refresh, ComfyUI attaches the DOM widget's element *after* our initial
+      // syncSize runs, so scrollHeight measures 0 and the node never grows to fit — the rows then render
+      // on top of the buttons below (previously only unstuck by editing/removing a row, which re-fires
+      // syncSize). Observe the editor's real layout and re-fit the moment it gets, or changes, its natural
+      // height, so it self-corrects with no user interaction. fitToContent doesn't alter contentEl's own
+      // height (only the node/reserved area), so this converges instead of looping.
+      let lastFitH = 0;
+      const rowsResizeObserver = new ResizeObserver(() => {
+        const h = contentEl.scrollHeight;
+        if (h && h !== lastFitH) { lastFitH = h; fitToContent(); }
+      });
+      rowsResizeObserver.observe(contentEl);
+      chainCallback(node, "onRemoved", () => rowsResizeObserver.disconnect());
 
       function render() {
         contentEl.replaceChildren();

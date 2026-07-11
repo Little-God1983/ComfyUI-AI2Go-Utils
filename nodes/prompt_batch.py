@@ -96,7 +96,14 @@ def _select(prompts, index):
     last entry and logs a warning, so a queued batch never hard-errors from walking off the end.
     """
     count = len(prompts)
-    idx = int(index)
+    # `index` should always arrive as an int, but tolerate None / a non-numeric value (e.g. an older
+    # cached workflow that serialized a null index) instead of hard-erroring on int(None). The primary
+    # guard is front-end (web/js/prompt_batch.js coerces the serialized value), this is the backstop.
+    try:
+        idx = int(index)
+    except (TypeError, ValueError):
+        logger.warning("AI2Go Prompt Batch: index %r is not an int, using 0.", index)
+        idx = 0
     if idx < 0:
         logger.warning("AI2Go Prompt Batch: index %d < 0, clamping to 0.", idx)
         idx = 0
