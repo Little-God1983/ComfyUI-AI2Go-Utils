@@ -137,6 +137,31 @@ SaveImage filename so each file records *which prompt* made it).
   `[{"positive": "...", "negative": "..."}, ...]` (a bare string is treated as positive-only), stored
   in a hidden field that both saves with the workflow and drives execution.
 
+#### JSON structure
+
+The prompt list — whether typed into the rows or imported via **📥 Read from JSON** — is a JSON
+**array**, one entry per queued run:
+
+```json
+[
+  { "positive": "a red fox in the snow, highly detailed, 8k", "negative": "blurry, watermark" },
+  { "positive": "a neon-lit city street at night, cinematic" }
+]
+```
+
+- **`positive`** *(required)* — the prompt text; must be non-empty.
+- **`negative`** *(optional)* — defaults to `""` when omitted or `null`.
+
+The importer also accepts these convenience forms:
+
+- A **bare string** entry is treated as positive-only — `["a red fox", "a neon city"]`.
+- **`prompt`** works as an alias for `positive`.
+- The array may be wrapped in an object — `{ "prompts": [ ... ] }`.
+
+Each run emits the entry at `index` (0-based) and the batch walks `0, 1, 2, …`. Entries with an empty
+`positive` are dropped when **Delete empty prompts** is on; otherwise they raise a "positive is empty"
+error at run time.
+
 #### Running a batch
 
 1. Build the list, then click **🔍 Check for prompts** — it validates, counts N, resets the index to 0,
