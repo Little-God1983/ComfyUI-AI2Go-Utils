@@ -122,6 +122,8 @@ and this node walks the list, emitting one prompt per run.
 **Outputs:** `positive`, `negative`, `index` (the 0-based index used this run — wire it into a
 SaveImage filename so each file records *which prompt* made it).
 
+![AI2Go Prompt Batch](assets/Batch.png)
+
 #### Editing prompts
 
 - A dynamic **row editor** (in the spirit of rgthree's Power Lora Loader): each row is a **positive**
