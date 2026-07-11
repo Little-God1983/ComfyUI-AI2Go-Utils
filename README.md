@@ -113,6 +113,47 @@ A "click-together" helper for the **style fields** of an Ideogram 4 caption — 
 back to the built-in defaults and shows a warning (with the exact parse error) plus a **Restore
 defaults** button that (re)creates the file.
 
+### AI2Go Prompt Batch
+
+Run a **list of prompts one at a time** across a queued batch — the text analog of the classic
+"Load Image Batch + increment index" trick. ComfyUI has no real for-loop, so you queue N runs by hand
+and this node walks the list, emitting one prompt per run.
+
+**Outputs:** `positive`, `negative`, `index` (the 0-based index used this run — wire it into a
+SaveImage filename so each file records *which prompt* made it).
+
+![AI2Go Prompt Batch](assets/Batch.png)
+
+#### Editing prompts
+
+- A dynamic **row editor** (in the spirit of rgthree's Power Lora Loader): each row is a **positive**
+  and **negative** text box side by side. **➕ Add Prompt** appends a row, **🗑** removes one, and the
+  **⠿** handle drag-reorders. The node **auto-grows and auto-shrinks** to fit; stretch it wider for
+  roomier boxes.
+- **📥 Read from JSON** — wire a text/primitive node holding a JSON prompt list into the optional
+  `json_in` socket, then click to **append** it to the rows.
+- **🗑 Clear All** wipes the list.
+- The rows are the source of truth; internally they serialize to the JSON array
+  `[{"positive": "...", "negative": "..."}, ...]` (a bare string is treated as positive-only), stored
+  in a hidden field that both saves with the workflow and drives execution.
+
+#### Running a batch
+
+1. Build the list, then click **🔍 Check for prompts** — it validates, counts N, resets the index to 0,
+   and tells you how many runs to queue.
+2. Set ComfyUI's **queue/run count to N** and run. The node advances `index` by 1 after each run
+   (immune to the "Widget Value Control Mode" setting), walking 0, 1, 2… across the batch.
+
+**Toggles.**
+
+- **Reset index at batch start** (default on) — zero the index when a new batch is queued, so every
+  batch starts from the first prompt.
+- **Delete empty prompts** (default on) — drop rows with an empty positive on **Check** and just before
+  a batch is queued, so blank rows never break a run or skew the count.
+
+If the index ever overshoots the list (more runs than prompts), it clamps to the last prompt instead of
+erroring.
+
 ## Credits & License
 
 Licensed under **GPL-3.0** — see [LICENSE](LICENSE).
