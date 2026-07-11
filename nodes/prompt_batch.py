@@ -10,7 +10,9 @@ Batch" + an increment primitive). This node is the text analog — paste a JSON 
 emits one positive/negative pair per run, walking the list by the same increment-index mechanism.
 
 Flow (mirrors the example's ritual):
-  1. Paste a JSON array of prompts into ``prompts_json``.
+  1. Build the prompt list in the front-end row editor (positive/negative text boxes, "➕ Add Prompt"),
+     or "📥 Read from JSON" to import a list wired into the ``json_in`` socket. The rows are synced
+     into the hidden ``prompts_json`` field, which is the authoritative execution source.
   2. Click "Check for prompts" (front-end) — validates the JSON, counts the prompts, resets index → 0,
      and tells you how many ComfyUI runs to queue.
   3. Set the ComfyUI batch/queue count to that number and run.
@@ -20,7 +22,8 @@ list 0,1,2… across the batch (the same effect as the example's increment primi
 index at batch start" toggle (default on) zeroes it when a new batch is queued so you never forget
 step 2's reset. The walk is driven from JS — via the node's own ``afterQueued`` hook rather than the
 built-in ``control_after_generate`` — so the increment timing is immune to the user's "Widget Value
-Control Mode" setting. Parsing here is authoritative and mirrored in the JS — keep the two in sync.
+Control Mode" setting. The current index is also emitted as an ``index`` output for use as a filename
+suffix. Parsing here is authoritative and mirrored in the JS — keep the two in sync.
 """
 
 import json
@@ -87,8 +90,10 @@ def _parse_prompts(raw):
 def _select(prompts, index):
     """Pick the prompt at ``index``, clamping into range as a safety net (never raises).
 
-    Overshoot (index past the last prompt — e.g. more runs queued than prompts) clamps to the last
-    entry and logs a warning, so a queued batch never hard-errors from walking off the end.
+    Returns ``(positive, negative, used_index)`` — the clamped index is emitted as an output so it
+    can be reused (e.g. as a SaveImage filename suffix) and always reflects the prompt that actually
+    ran. Overshoot (index past the last prompt — e.g. more runs queued than prompts) clamps to the
+    last entry and logs a warning, so a queued batch never hard-errors from walking off the end.
     """
     count = len(prompts)
     idx = int(index)
@@ -98,7 +103,8 @@ def _select(prompts, index):
     elif idx >= count:
         logger.warning("AI2Go Prompt Batch: index %d >= count %d, clamping to last prompt.", idx, count)
         idx = count - 1
-    return prompts[idx]
+    positive, negative = prompts[idx]
+    return positive, negative, idx
 
 
 class AI2GoPromptBatch(io.ComfyNode):
@@ -117,19 +123,31 @@ example's "Load Image Batch + increment index" trick.
 - prompts_json: a JSON array of prompts. Each entry is an object with a required 'positive' and an
   optional 'negative' (a plain string entry is treated as positive-only). Example:
   [{"positive": "a red fox, 8k", "negative": "blurry"}, {"positive": "a neon city"}].
+- Rows editor (front-end): edit prompts as positive/negative text boxes; "➕ Add Prompt" / "🗑 Clear
+  All" manage the list. The rows are kept in sync with the hidden prompts_json field, which is what
+  actually runs.
+- json_in: optional STRING socket. "📥 Read from JSON" imports a connected node's JSON list into the
+  rows. Ignored at run time — the rows are authoritative.
 - index: which prompt to emit this run (0-based). The front-end advances it by 1 after each queued
   run, so it walks 0,1,2… across a queued batch.
 - reset_index_at_batch_start: (front-end) zero the index when a new batch is queued so every batch
   starts from the first prompt.
 
 Click "Check for prompts" to validate the JSON, count the prompts, and reset the index to 0 — then set
-the ComfyUI queue count to that number. Outputs the current prompt's positive and negative strings;
-if the index overshoots the list it clamps to the last prompt.""",
+the ComfyUI queue count to that number. Outputs the current prompt's positive and negative strings and
+the 0-based index used this run (handy as a SaveImage filename suffix); if the index overshoots the
+list it clamps to the last prompt.""",
             inputs=[
                 io.String.Input(
-                    "prompts_json", multiline=True, default=DEFAULT_PROMPTS_JSON,
-                    tooltip="A JSON array of prompts. Each entry: {\"positive\": \"...\", \"negative\": \"...\"} "
-                            "(negative optional). Use the \"Check for prompts\" button to validate and count.",
+                    "json_in", optional=True, force_input=True,
+                    tooltip="Optional STRING socket. Wire a text/primitive node holding a JSON prompt list here, "
+                            "then press \"Read from JSON\" to import it into the rows. Ignored at run time — the "
+                            "rows you edit are what actually run.",
+                ),
+                io.String.Input(
+                    "prompts_json", default=DEFAULT_PROMPTS_JSON,
+                    tooltip="Authoritative prompt list as JSON. Hidden in the UI and kept in sync with the row "
+                            "editor by the front-end — edit the rows, not this.",
                 ),
                 io.Int.Input(
                     "index", default=0, min=0, max=1_000_000, step=1,
@@ -145,13 +163,17 @@ if the index overshoots the list it clamps to the last prompt.""",
             outputs=[
                 io.String.Output(display_name="positive"),
                 io.String.Output(display_name="negative"),
+                io.Int.Output(display_name="index"),
             ],
         )
 
     @classmethod
-    def execute(cls, prompts_json=DEFAULT_PROMPTS_JSON, index=0, reset_index_at_batch_start=True) -> io.NodeOutput:
-        # reset_index_at_batch_start is a front-end-only behavior (see web/js/prompt_batch.js); it is
-        # accepted here only so it serializes with the node.
+    def execute(cls, json_in=None, prompts_json=DEFAULT_PROMPTS_JSON, index=0,
+                reset_index_at_batch_start=True) -> io.NodeOutput:
+        # json_in and reset_index_at_batch_start are front-end-only (see web/js/prompt_batch.js):
+        # json_in is an import source for the "Read from JSON" button and reset is a queue-time
+        # behavior; both are accepted here only so they serialize / the socket exists. The rows the
+        # user edits are synced into prompts_json, which is the authoritative execution source.
         prompts = _parse_prompts(prompts_json)
-        positive, negative = _select(prompts, index)
-        return io.NodeOutput(positive, negative)
+        positive, negative, used_index = _select(prompts, index)
+        return io.NodeOutput(positive, negative, used_index)
