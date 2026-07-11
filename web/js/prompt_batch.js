@@ -7,8 +7,10 @@
  * positive and a negative text box, drag-to-reorder (⠿) and per-row remove (🗑). Buttons:
  *   • 📥 Read from JSON — parse the node wired into the optional `json_in` socket and APPEND its
  *     prompts to the rows (pulled to the top, next to the input).
- *   • ➕ Add Prompt / 🗑 Clear All — grow or wipe the list.
+ *   • ➕ Add Prompt / 🗑 Clear All — grow or wipe the list; the node auto-grows AND auto-shrinks to fit.
  *   • 🔍 Check for prompts — validate + count, reset index to 0, report how many runs to queue.
+ * The "delete_empty_prompts" toggle (default on) drops rows with an empty positive on Check and just
+ * before a batch is queued, so blank rows never break a run or skew the count.
  *
  * The rows are the source of truth. They are serialized into the hidden `prompts_json` widget, which
  * is what the Python `execute` reads — so save/load and execution both flow through that one field.
@@ -105,6 +107,7 @@ function ensureStyles() {
   s.textContent = `
   .ai2go-pb{display:flex;flex-direction:column;gap:6px;width:100%;box-sizing:border-box;
     font:12px/1.4 -apple-system,"Segoe UI",Roboto,sans-serif;color:#d3d3d0;padding:1px 0}
+  .ai2go-pb-content{display:flex;flex-direction:column;gap:6px;width:100%}
   .ai2go-pb .pb-head{display:flex;justify-content:space-between;padding:0 2px;font-size:10.5px;color:#8b8b86}
   .ai2go-pb .pb-head .pos{color:#5cae6d}.ai2go-pb .pb-head .neg{color:#c86b6b}
   .ai2go-pb .pb-empty{padding:8px;text-align:center;color:#6d6d68;font-size:11px;
@@ -120,7 +123,7 @@ function ensureStyles() {
   .ai2go-pb .pb-field{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
   .ai2go-pb .pb-lbl{font-size:9px;letter-spacing:.06em;text-transform:uppercase;font-weight:600}
   .ai2go-pb .pb-field.pos .pb-lbl{color:#5cae6d}.ai2go-pb .pb-field.neg .pb-lbl{color:#c86b6b}
-  .ai2go-pb textarea{width:100%;box-sizing:border-box;resize:vertical;min-height:40px;
+  .ai2go-pb textarea{width:100%;box-sizing:border-box;resize:vertical;min-height:88px;
     background:#1a1a19;border:1px solid #33332f;border-radius:5px;padding:5px 7px;
     color:#d3d3d0;font:11.5px/1.4 -apple-system,"Segoe UI",Roboto,sans-serif;outline:none}
   .ai2go-pb textarea:focus{border-color:#46b4e6}
@@ -145,6 +148,7 @@ app.registerExtension({
       try {
         for (const node of app.graph?._nodes || []) {
           if (node?.comfyClass !== NODE_ID && node?.type !== NODE_ID) continue;
+          if (node._pbPruneEmpties && findWidget(node, "delete_empty_prompts")?.value) node._pbPruneEmpties();
           const resetW = findWidget(node, "reset_index_at_batch_start");
           if (!resetW || resetW.value) setIndex(node, 0);
         }
@@ -174,10 +178,15 @@ app.registerExtension({
       // serialization, so the run that fired used the pre-increment value).
       const idxW = findWidget(node, "index");
       if (idxW) idxW.afterQueued = () => setIndex(node, (parseInt(idxW.value, 10) || 0) + 1);
+      const delEmptyW = findWidget(node, "delete_empty_prompts");
 
-      // ── DOM row editor ──
+      // ── DOM row editor. editorEl is the widget root (ComfyUI pins its height each frame); the rows
+      // live in contentEl, whose *natural* height we measure so the node can both grow and shrink. ──
       const editorEl = document.createElement("div");
       editorEl.className = "ai2go-pb";
+      const contentEl = document.createElement("div");
+      contentEl.className = "ai2go-pb-content";
+      editorEl.append(contentEl);
       const rowsWidget = node.addDOMWidget("prompt_batch_rows", "rows", editorEl, { serialize: false });
 
       // Serialize rows -> hidden prompts_json (the field Python reads and the workflow saves).
@@ -185,11 +194,13 @@ app.registerExtension({
         if (jsonW) jsonW.value = JSON.stringify(node._pbRows.map((r) => ({ positive: r.positive, negative: r.negative })));
       }
 
-      // Resize the node to fit the current rows (measured, so no magic row-height constant).
+      // Resize the node to fit the current rows (measured, so no magic row-height constant). We measure
+      // contentEl (natural height), NOT editorEl (height pinned by ComfyUI) — otherwise a removed row
+      // couldn't shrink the node, because the pinned element keeps its old, larger height.
       function syncSize() {
         requestAnimationFrame(() => {
-          const h = Math.max(editorEl.scrollHeight, 8);
-          rowsWidget.computeSize = () => [node.size?.[0] || 320, h + 4];
+          const h = Math.max(contentEl.scrollHeight, 8);
+          rowsWidget.computeSize = () => [node.size?.[0] || 320, h + 8];
           const want = node.computeSize?.();
           if (want) node.setSize([node.size[0], want[1]]);
           node.setDirtyCanvas?.(true, true);
@@ -197,18 +208,18 @@ app.registerExtension({
       }
 
       function render() {
-        editorEl.replaceChildren();
+        contentEl.replaceChildren();
 
         const head = document.createElement("div");
         head.className = "pb-head";
         head.innerHTML = `<span>Prompts</span><span><span class="pos">positive</span> / <span class="neg">negative</span></span>`;
-        editorEl.appendChild(head);
+        contentEl.appendChild(head);
 
         if (!node._pbRows.length) {
           const empty = document.createElement("div");
           empty.className = "pb-empty";
           empty.textContent = "No prompts — press ➕ Add Prompt or 📥 Read from JSON.";
-          editorEl.appendChild(empty);
+          contentEl.appendChild(empty);
           return;
         }
 
@@ -224,7 +235,7 @@ app.registerExtension({
           grip.addEventListener("mousedown", () => { el.draggable = true; });
           el.addEventListener("mouseup", () => { el.draggable = false; }); // grip pressed but not dragged
           el.addEventListener("dragstart", (e) => { dragIndex = k; e.dataTransfer.effectAllowed = "move"; el.classList.add("pb-drag"); });
-          el.addEventListener("dragend", () => { el.draggable = false; dragIndex = -1; el.classList.remove("pb-drag"); editorEl.querySelectorAll(".pb-over").forEach((n) => n.classList.remove("pb-over")); });
+          el.addEventListener("dragend", () => { el.draggable = false; dragIndex = -1; el.classList.remove("pb-drag"); contentEl.querySelectorAll(".pb-over").forEach((n) => n.classList.remove("pb-over")); });
           el.addEventListener("dragover", (e) => { e.preventDefault(); if (dragIndex > -1 && dragIndex !== k) el.classList.add("pb-over"); });
           el.addEventListener("dragleave", () => el.classList.remove("pb-over"));
           el.addEventListener("drop", (e) => {
@@ -252,7 +263,7 @@ app.registerExtension({
             const ta = document.createElement("textarea");
             ta.value = row[key] || "";
             ta.placeholder = key === "positive" ? "prompt…" : "(optional)";
-            ta.rows = 2;
+            ta.rows = 5;
             ta.addEventListener("input", () => { row[key] = ta.value; syncJson(); });
             // Don't let canvas hotkeys / drag steal keyboard focus while typing.
             ta.addEventListener("pointerdown", (e) => e.stopPropagation());
@@ -267,7 +278,7 @@ app.registerExtension({
           trash.addEventListener("click", () => { node._pbRows.splice(k, 1); render(); syncJson(); syncSize(); });
 
           el.append(grip, num, fields, trash);
-          editorEl.appendChild(el);
+          contentEl.appendChild(el);
         });
       }
 
@@ -276,6 +287,16 @@ app.registerExtension({
         const res = parsePrompts(jsonW?.value);
         node._pbRows = res.ok ? res.prompts.map((p) => ({ positive: p.positive, negative: p.negative })) : [];
         render(); syncJson(); syncSize();
+      };
+
+      // Drop rows whose positive is empty. Used by "Check for prompts" and by the queue hook when the
+      // "delete_empty_prompts" toggle is on, so blank rows never break a run or shift the count.
+      node._pbPruneEmpties = () => {
+        const before = node._pbRows.length;
+        node._pbRows = node._pbRows.filter((r) => String(r.positive || "").trim() !== "");
+        const removed = before - node._pbRows.length;
+        if (removed) { render(); syncJson(); syncSize(); }
+        return removed;
       };
 
       // ── Buttons (native, so they look/behave like ComfyUI). Created in display order; Read is then
@@ -311,11 +332,13 @@ app.registerExtension({
       const setStatus = (text, color) => { statusEl.textContent = text; statusEl.style.color = color; node.setDirtyCanvas?.(true, true); };
 
       const checkBtn = node.addWidget("button", "🔍 Check for prompts", null, () => {
+        const removed = delEmptyW?.value ? node._pbPruneEmpties() : 0;
         const res = parsePrompts(jsonW?.value);
         if (!res.ok) { setStatus("❌ " + res.error, "#e0555a"); return; }
         const n = res.prompts.length;
         setIndex(node, 0);
-        setStatus(`✅ ${n} prompt${n === 1 ? "" : "s"} detected — set ComfyUI runs to ${n} (index reset to 0).`, "#46b4e6");
+        const dropped = removed ? ` (removed ${removed} empty)` : "";
+        setStatus(`✅ ${n} prompt${n === 1 ? "" : "s"} detected${dropped} — set ComfyUI runs to ${n} (index reset to 0).`, "#46b4e6");
       });
       checkBtn.serialize = false;
 

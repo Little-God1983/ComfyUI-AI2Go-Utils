@@ -159,6 +159,12 @@ list it clamps to the last prompt.""",
                     tooltip="When on, the index is reset to 0 at the start of every queued batch, so each batch "
                             "starts from the first prompt. Off = the index keeps its value between batches.",
                 ),
+                io.Boolean.Input(
+                    "delete_empty_prompts", default=True,
+                    tooltip="When on, prompts with an empty 'positive' are dropped when you press \"Check for "
+                            "prompts\" and just before a batch is queued, so blank rows never break a run or "
+                            "throw off the count.",
+                ),
             ],
             outputs=[
                 io.String.Output(display_name="positive"),
@@ -169,11 +175,12 @@ list it clamps to the last prompt.""",
 
     @classmethod
     def execute(cls, json_in=None, prompts_json=DEFAULT_PROMPTS_JSON, index=0,
-                reset_index_at_batch_start=True) -> io.NodeOutput:
-        # json_in and reset_index_at_batch_start are front-end-only (see web/js/prompt_batch.js):
-        # json_in is an import source for the "Read from JSON" button and reset is a queue-time
-        # behavior; both are accepted here only so they serialize / the socket exists. The rows the
-        # user edits are synced into prompts_json, which is the authoritative execution source.
+                reset_index_at_batch_start=True, delete_empty_prompts=True) -> io.NodeOutput:
+        # json_in, reset_index_at_batch_start and delete_empty_prompts are front-end-only (see
+        # web/js/prompt_batch.js): json_in is an import source for the "Read from JSON" button, and the
+        # two toggles are queue-time behaviors. All three are accepted here only so they serialize /
+        # the socket exists. The rows the user edits are synced into prompts_json, which is the
+        # authoritative execution source.
         prompts = _parse_prompts(prompts_json)
         positive, negative, used_index = _select(prompts, index)
         return io.NodeOutput(positive, negative, used_index)
