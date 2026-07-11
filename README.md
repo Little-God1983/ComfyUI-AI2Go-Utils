@@ -158,7 +158,11 @@ erroring.
 
 Licensed under **GPL-3.0** — see [LICENSE](LICENSE).
 
-This pack is built on the **Ideogram 4 Prompt Builder** node and editor from
-[**ComfyUI-KJNodes**](https://github.com/kijai/ComfyUI-KJNodes) by **Kijai**, which is licensed under
-GPL-3.0. Huge thanks to Kijai for the original work — the derived files retain their attribution, and
-per GPL-3.0 this pack is released under the same license.
+Only the **Ideogram 4 Prompt Builder** node and its canvas editor are derived from
+[**ComfyUI-KJNodes**](https://github.com/kijai/ComfyUI-KJNodes) by **Kijai** (GPL-3.0). Huge thanks to
+Kijai for that original work — the derived files retain their attribution.
+
+Everything else in this pack — the **Ideogram 4 Style Wizard**, the **Resolution Selector**, and the
+**Prompt Batch** node — is original development by **AIKnowledge2Go**.
+
+Because the pack includes Kijai's GPL-3.0 code, the whole pack is released under **GPL-3.0** as well.
