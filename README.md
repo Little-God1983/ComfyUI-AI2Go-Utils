@@ -179,6 +179,74 @@ error at run time.
 If the index ever overshoots the list (more runs than prompts), it clamps to the last prompt instead of
 erroring.
 
+### AI2Go Save Metadata (Civitai)
+
+Two output nodes that save PNG(s) with an **A1111-style `parameters` text chunk** — the flat,
+human-readable format Civitai actually parses to show the prompt and auto-link the checkpoint and
+LoRAs. ComfyUI's stock Save Image embeds the raw `workflow`/`prompt` graph instead, which Civitai
+can't reliably read back into a prompt — and for a dynamic workflow (our own **AI2Go Prompt Batch**
+is the worst case: one graph, N prompts, disambiguated only by a run index) it's actively
+misleading. These nodes trace the graph at save time to capture the **real prompt used on this
+specific run**.
+
+**AI2Go Save Metadata (Civitai)** (Basic) auto-traces everything — positive, negative, steps, CFG,
+seed, sampler, scheduler, model, and LoRAs — by walking backward from the KSampler feeding the saved
+image (falling back to "the only sampler in the graph" if that walk doesn't land on one). When the
+positive/negative text comes from an **AI2Go Prompt Batch** node, the trace reads that node's
+current `index` and resolves the exact line that ran for this queue item, not the whole batch list.
+
+**AI2Go Save Metadata (Civitai) Advanced** adds optional override sockets — `positive`, `negative`,
+`steps`, `cfg`, `seed`, `sampler_name`, `scheduler` — that win over the trace when wired. Wiring a
+Prompt Batch node's `positive`/`negative` outputs straight into these sockets is the reliable path
+for dynamic/batch prompts: no static-graph guessing, just the string that actually ran. Model and
+LoRAs are always auto-traced on both nodes — a variable-length LoRA chain isn't practical to socket,
+and it's static graph data regardless of which prompt ran.
+
+#### What gets written
+
+One `parameters` chunk, A1111 order:
+
+```
+{positive} <lora:name:weight> ...
+Negative prompt: {negative}
+Steps: …, Sampler: …, CFG scale: …, Seed: …, Size: …, Model hash: …, Model: …, Lora hashes: "...", Version: ComfyUI
+```
+
+Each traced LoRA is appended to the positive line as a `<lora:name:weight>` tag and listed again in
+`Lora hashes:` — both signals Civitai uses to auto-link the resource. Unknown/unresolved fields are
+omitted, never guessed; if something can't be traced (e.g. two KSamplers in the graph, or a dynamic
+prompt source the tracer doesn't recognize), a warning names the unresolved field(s) in the ComfyUI
+log / node progress text, so you know to wire the Advanced node's sockets.
+
+#### Test button
+
+Both nodes have a **🔎 Test detection** button that runs the same trace against the *live* editor
+graph and previews positive/negative, steps/cfg/sampler/seed, model, LoRAs, and any unresolved
+fields — so you can check exactly what will be saved before queuing a run.
+
+#### `save_workflow`
+
+Off by default. **Off** — the PNG carries only the Civitai `parameters` chunk. **On** — it also
+embeds the ComfyUI `workflow`/`prompt` chunks, the same as the stock Save Image, if you still want
+the graph recoverable from the file.
+
+#### Model & LoRA hashing
+
+Civitai matches a checkpoint/LoRA to its resource page by **AutoV2** — the first 10 hex characters
+of the file's full SHA-256. Hashing a multi-GB checkpoint is slow, so hashes are cached in
+`.hash_cache.json` (in the pack folder, git-ignored) keyed by path + size + mtime: the **first save
+of a new checkpoint or LoRA pays the hashing cost once**; every save after that is instant.
+
+> **Verification pending:** the AutoV2 hash flavor is the one Civitai's own docs index against, but
+> end-to-end confirmation — uploading a real image and watching Civitai auto-link the checkpoint and
+> LoRA(s) — is still a pending manual check.
+
+#### Assumption
+
+Both nodes assume **one KSampler** in the workflow. Multi-sampler graphs (e.g. a hires-fix pass with
+two KSamplers) aren't disambiguated by the trace; wire the Advanced node's override sockets in that
+case.
+
 ## Credits & License
 
 Licensed under **GPL-3.0** — see [LICENSE](LICENSE).
@@ -187,7 +255,8 @@ Only the **Ideogram 4 Prompt Builder** node and its canvas editor are derived fr
 [**ComfyUI-KJNodes**](https://github.com/kijai/ComfyUI-KJNodes) by **Kijai** (GPL-3.0). Huge thanks to
 Kijai for that original work — the derived files retain their attribution.
 
-Everything else in this pack — the **Ideogram 4 Style Wizard**, the **Resolution Selector**, and the
-**Prompt Batch** node — is original development by **AIKnowledge2Go**.
+Everything else in this pack — the **Ideogram 4 Style Wizard**, the **Resolution Selector**, the
+**Prompt Batch** node, and the **Save Metadata (Civitai)** nodes — is original development by
+**AIKnowledge2Go**.
 
 Because the pack includes Kijai's GPL-3.0 code, the whole pack is released under **GPL-3.0** as well.

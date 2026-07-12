@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-ai2go-utils"
 description = "ComfyUI utility nodes by AIKnowledge2Go."
-version = "1.4.0"
+version = "1.5.0"
 license = { file = "LICENSE" }
 dependencies = [
     "pillow>=10.3.0",
@@ -10,6 +10,16 @@ dependencies = [
 [project.urls]
 Repository = "https://github.com/Little-God1983/ComfyUI-AI2Go-Utils"
 #  Used by Comfy Registry https://comfyregistry.org
+
+[tool.pytest.ini_options]
+# The repo root doubles as the ComfyUI extension package (its own __init__.py does
+# `from .nodes... import ...`). Without this, pytest's default collection wraps the repo root in
+# a Package collector (any dir with __init__.py) and imports that __init__.py directly to set it
+# up, which breaks: those relative imports need `comfy_api`, not installed in a bare test run.
+# Capping confcutdir at tests/ keeps the repo root out of that collector chain (run pytest from
+# the repo root, as documented, so this relative path resolves correctly).
+addopts = "--confcutdir=tests"
+testpaths = ["tests"]
 
 [tool.comfy]
 PublisherId = "littlegod"
