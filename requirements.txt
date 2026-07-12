@@ -1,1 +1,4 @@
 pillow>=10.3.0
+
+# dev/test only (not needed at runtime):
+# pytest>=8.0
