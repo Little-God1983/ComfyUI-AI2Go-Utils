@@ -26,92 +26,13 @@ Control Mode" setting. The current index is also emitted as an ``index`` output 
 suffix. Parsing here is authoritative and mirrored in the JS — keep the two in sync.
 """
 
-import json
 import logging
 
 from comfy_api.latest import io
 
+from .prompt_batch_core import DEFAULT_PROMPTS_JSON, parse_prompts as _parse_prompts, select_prompt as _select
+
 logger = logging.getLogger(__name__)
-
-# Shown in the paste field on a fresh node so the expected shape is obvious.
-DEFAULT_PROMPTS_JSON = json.dumps(
-    [
-        {"positive": "a red fox in the snow, highly detailed, 8k", "negative": "blurry, watermark"},
-        {"positive": "a neon-lit city street at night, cinematic", "negative": ""},
-    ],
-    indent=2,
-)
-
-
-def _parse_prompts(raw):
-    """Parse the prompts JSON into a list of ``(positive, negative)`` string pairs.
-
-    Accepts a JSON array of objects (canonical), a bare string entry (positive-only shorthand), or a
-    ``{"prompts": [...]}`` wrapper. Raises ``ValueError`` with a human-readable message on anything
-    malformed so both the front-end check and graph execution can report the same problem.
-    """
-    text = (raw or "").strip()
-    if not text:
-        raise ValueError("Prompt JSON is empty — paste a JSON array of prompts.")
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Malformed JSON: {e.msg} (line {e.lineno}, column {e.colno}).") from e
-
-    if isinstance(data, dict) and isinstance(data.get("prompts"), list):
-        data = data["prompts"]  # tolerate a {"prompts": [...]} wrapper
-    if not isinstance(data, list):
-        raise ValueError('Expected a JSON array of prompts, e.g. [{"positive": "..."}, ...].')
-    if not data:
-        raise ValueError("Prompt list is empty — it needs at least one prompt.")
-
-    prompts = []
-    for i, entry in enumerate(data):
-        where = f"Prompt #{i + 1}"
-        if isinstance(entry, str):
-            positive, negative = entry, ""
-        elif isinstance(entry, dict):
-            positive = entry.get("positive", entry.get("prompt", ""))
-            negative = entry.get("negative", "")
-            if negative is None:
-                negative = ""
-            if not isinstance(positive, str):
-                raise ValueError(f"{where}: 'positive' must be a string.")
-            if not isinstance(negative, str):
-                raise ValueError(f"{where}: 'negative' must be a string.")
-        else:
-            raise ValueError(f"{where}: each entry must be an object with a 'positive' field (or a plain string).")
-        if not positive.strip():
-            raise ValueError(f"{where}: 'positive' is empty.")
-        prompts.append((positive, negative))
-    return prompts
-
-
-def _select(prompts, index):
-    """Pick the prompt at ``index``, clamping into range as a safety net (never raises).
-
-    Returns ``(positive, negative, used_index)`` — the clamped index is emitted as an output so it
-    can be reused (e.g. as a SaveImage filename suffix) and always reflects the prompt that actually
-    ran. Overshoot (index past the last prompt — e.g. more runs queued than prompts) clamps to the
-    last entry and logs a warning, so a queued batch never hard-errors from walking off the end.
-    """
-    count = len(prompts)
-    # `index` should always arrive as an int, but tolerate None / a non-numeric value (e.g. an older
-    # cached workflow that serialized a null index) instead of hard-erroring on int(None). The primary
-    # guard is front-end (web/js/prompt_batch.js coerces the serialized value), this is the backstop.
-    try:
-        idx = int(index)
-    except (TypeError, ValueError):
-        logger.warning("AI2Go Prompt Batch: index %r is not an int, using 0.", index)
-        idx = 0
-    if idx < 0:
-        logger.warning("AI2Go Prompt Batch: index %d < 0, clamping to 0.", idx)
-        idx = 0
-    elif idx >= count:
-        logger.warning("AI2Go Prompt Batch: index %d >= count %d, clamping to last prompt.", idx, count)
-        idx = count - 1
-    positive, negative = prompts[idx]
-    return positive, negative, idx
 
 
 class AI2GoPromptBatch(io.ComfyNode):
