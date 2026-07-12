@@ -9,6 +9,7 @@ from .nodes.ideogram4_nodes import AI2GoIdeogram4PromptBuilder
 from .nodes.ideogram4_style_wizard import AI2GoIdeogram4StyleWizard
 from .nodes.resolution_selector import AI2GoResolutionSelector
 from .nodes.prompt_batch import AI2GoPromptBatch
+from .nodes.save_civitai_metadata import AI2GoSaveCivitaiMetadata, AI2GoSaveCivitaiMetadataAdvanced
 
 # Key MUST match each node's schema node_id.
 NODE_CLASS_MAPPINGS = {
@@ -16,6 +17,8 @@ NODE_CLASS_MAPPINGS = {
     "AI2GoIdeogram4StyleWizard": AI2GoIdeogram4StyleWizard,
     "AI2GoResolutionSelector": AI2GoResolutionSelector,
     "AI2GoPromptBatch": AI2GoPromptBatch,
+    "AI2GoSaveCivitaiMetadata": AI2GoSaveCivitaiMetadata,
+    "AI2GoSaveCivitaiMetadataAdvanced": AI2GoSaveCivitaiMetadataAdvanced,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -23,6 +26,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "AI2GoIdeogram4StyleWizard": "AI2Go Ideogram 4 Style Wizard",
     "AI2GoResolutionSelector": "AI2Go Resolution Selector",
     "AI2GoPromptBatch": "AI2Go Prompt Batch",
+    "AI2GoSaveCivitaiMetadata": "AI2Go Save Metadata (Civitai)",
+    "AI2GoSaveCivitaiMetadataAdvanced": "AI2Go Save Metadata (Civitai) Advanced",
 }
 
 # Folder of front-end JavaScript served to the ComfyUI client.
