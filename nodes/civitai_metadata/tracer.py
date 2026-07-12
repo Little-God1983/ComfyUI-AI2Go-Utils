@@ -8,7 +8,11 @@
 # resolution (incl. our AI2GoPromptBatch), (3) the model/LoRA chain.
 from dataclasses import dataclass, field
 
+from ..prompt_batch_core import parse_prompts, select_prompt
+
 SAMPLER_CLASSES = {"KSampler", "KSamplerAdvanced", "SamplerCustom", "SamplerCustomAdvanced"}
+CLIP_ENCODE_CLASSES = {"CLIPTextEncode"}
+BATCH_CLASS = "AI2GoPromptBatch"
 
 
 @dataclass
@@ -88,6 +92,76 @@ def _read_sampler_fields(sampler, r):
             r.unresolved.append(f)
 
 
+def _find_clip_encode(prompt, start_id):
+    """BFS backward to the nearest CLIPTextEncode (walks through conditioning combiners)."""
+    seen = set()
+    queue = [str(start_id)]
+    while queue:
+        nid = queue.pop(0)
+        if nid in seen:
+            continue
+        seen.add(nid)
+        node = _node(prompt, nid)
+        if not node:
+            continue
+        if node.get("class_type") in CLIP_ENCODE_CLASSES:
+            return nid, node
+        for v in node.get("inputs", {}).values():
+            if _is_link(v):
+                queue.append(str(v[0]))
+    return None, None
+
+
+def _resolve_batch(origin, slot):
+    raw = origin.get("inputs", {}).get("prompts_json")
+    idx = origin.get("inputs", {}).get("index", 0)
+    if not isinstance(raw, str):
+        return "", False
+    try:
+        prompts = parse_prompts(raw)
+        pos, neg, _ = select_prompt(prompts, idx)
+    except Exception:
+        return "", False
+    return (pos if slot == 0 else neg), True
+
+
+def _resolve_text(prompt, clip_node):
+    text = clip_node.get("inputs", {}).get("text")
+    if isinstance(text, str):
+        return text, True
+    if not _is_link(text):
+        return "", False
+    oid, slot = str(text[0]), text[1]
+    origin = _node(prompt, oid)
+    if not origin:
+        return "", False
+    if origin.get("class_type") == BATCH_CLASS:
+        return _resolve_batch(origin, slot)
+    for v in origin.get("inputs", {}).values():  # plain primitive/string node
+        if isinstance(v, str):
+            return v, True
+    return "", False
+
+
+def _resolve_conditioning_text(prompt, sampler, which):
+    link = sampler.get("inputs", {}).get(which)
+    if not _is_link(link):
+        return "", False
+    _cid, clip = _find_clip_encode(prompt, str(link[0]))
+    if clip is None:
+        return "", False
+    return _resolve_text(prompt, clip)
+
+
+def _resolve_prompts(prompt, sampler, r):
+    r.positive, ok_p = _resolve_conditioning_text(prompt, sampler, "positive")
+    r.negative, ok_n = _resolve_conditioning_text(prompt, sampler, "negative")
+    if not ok_p:
+        r.unresolved.append("positive")
+    if not ok_n:
+        r.unresolved.append("negative")
+
+
 def trace(prompt, node_id):
     r = TraceResult()
     prompt = prompt or {}
@@ -105,6 +179,6 @@ def trace(prompt, node_id):
         return r
 
     _read_sampler_fields(sampler, r)
-    # Tasks 7 & 8 extend trace() here: _resolve_prompts(prompt, sampler, r) and
-    # _trace_model_chain(prompt, sampler, r).
+    _resolve_prompts(prompt, sampler, r)
+    # Task 8 extends here: _trace_model_chain(prompt, sampler, r).
     return r
