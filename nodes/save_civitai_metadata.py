@@ -6,6 +6,7 @@
 # web/js/save_civitai_metadata.js (the Test button) — keep the two in sync.
 import os
 import logging
+from datetime import datetime
 
 import numpy as np
 from PIL import Image
@@ -24,6 +25,7 @@ from .civitai_metadata.sampler_names import to_a1111_sampler
 from .civitai_metadata.a1111 import format_parameters
 from .civitai_metadata.hashing import HashCache
 from .civitai_metadata.png_info import build_pnginfo
+from .civitai_metadata.filenames import expand_date_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +51,9 @@ def _save_with_metadata(cls, images, filename_prefix, save_workflow, overrides):
 
     # Resolve model + LoRA file paths to AutoV2 hashes (cached).
     cache = HashCache(_CACHE_PATH)
-    model_hash = cache.get(folder_paths.get_full_path("checkpoints", result.model_file)) if result.model_file else None
+    model_hash = cache.get(
+        folder_paths.get_full_path(result.model_folder or "checkpoints", result.model_file)
+    ) if result.model_file else None
     for lo in result.loras:
         path = folder_paths.get_full_path("loras", lo["file"]) if lo.get("file") else None
         lo["hash"] = cache.get(path) if path else None
@@ -63,6 +67,9 @@ def _save_with_metadata(cls, images, filename_prefix, save_workflow, overrides):
         denoise=result.denoise, clip_skip=result.clip_skip,
     )
 
+    # Expand %date:FORMAT% (frontend feature that doesn't reach a custom node's widget) before the
+    # rest of the tokens (%year%/subfolders) that get_save_image_path itself handles.
+    filename_prefix = expand_date_tokens(filename_prefix, datetime.now())
     full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(
         filename_prefix, folder_paths.get_output_directory(), width, height)
 

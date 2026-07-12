@@ -14,7 +14,17 @@ from ..prompt_batch_core import parse_prompts, select_prompt
 SAMPLER_CLASSES = {"KSampler", "KSamplerAdvanced", "SamplerCustom", "SamplerCustomAdvanced"}
 CLIP_ENCODE_CLASSES = {"CLIPTextEncode"}
 BATCH_CLASS = "AI2GoPromptBatch"
-CHECKPOINT_CLASSES = {"CheckpointLoaderSimple", "CheckpointLoader", "unCLIPCheckpointLoader"}
+# Model-source loaders → (widget holding the filename, folder_paths folder to hash it from).
+# Covers checkpoints AND standalone diffusion models (UNETLoader "Load Diffusion Model" — Flux/SD3/
+# Krea/etc.), plus common GGUF unet loaders. Unknown loaders fall through as pass-throughs.
+MODEL_SOURCES = {
+    "CheckpointLoaderSimple": ("ckpt_name", "checkpoints"),
+    "CheckpointLoader": ("ckpt_name", "checkpoints"),
+    "unCLIPCheckpointLoader": ("ckpt_name", "checkpoints"),
+    "UNETLoader": ("unet_name", "diffusion_models"),
+    "UnetLoaderGGUF": ("unet_name", "diffusion_models"),
+    "UnetLoaderGGUFAdvanced": ("unet_name", "diffusion_models"),
+}
 LORA_CLASSES = {"LoraLoader", "LoraLoaderModelOnly"}
 
 
@@ -31,6 +41,7 @@ class TraceResult:
     clip_skip: object = None
     model_name: str = None
     model_file: str = None
+    model_folder: str = None
     loras: list = field(default_factory=list)
     unresolved: list = field(default_factory=list)
 
@@ -190,11 +201,13 @@ def _trace_model_chain(prompt, sampler, r):
             nxt = ins.get("model")
             nid = str(nxt[0]) if _is_link(nxt) else None
             continue
-        if cls in CHECKPOINT_CLASSES:
-            ck = ins.get("ckpt_name")
-            if isinstance(ck, str):
-                r.model_name = _stem(ck)
-                r.model_file = ck
+        if cls in MODEL_SOURCES:
+            widget, folder = MODEL_SOURCES[cls]
+            name = ins.get(widget)
+            if isinstance(name, str):
+                r.model_name = _stem(name)
+                r.model_file = name
+                r.model_folder = folder
             break
         nxt = ins.get("model")  # pass-through node (e.g. ModelSamplingDiscrete)
         nid = str(nxt[0]) if _is_link(nxt) else None

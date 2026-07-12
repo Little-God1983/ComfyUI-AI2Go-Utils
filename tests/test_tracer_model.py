@@ -43,3 +43,32 @@ def test_model_only_lora_and_passthrough():
     r = trace(p, "7")
     assert [lo["name"] for lo in r.loras] == ["C"]
     assert r.model_name == "myCkpt"
+
+
+def test_checkpoint_folder_is_checkpoints():
+    r = trace(_base(), "7")
+    assert r.model_folder == "checkpoints"
+
+
+def test_unet_loader_diffusion_model():
+    # Flux/Krea-style: model comes from a Load Diffusion Model (UNETLoader), not a checkpoint.
+    p = _base()
+    del p["1"]["inputs"]["ckpt_name"]
+    p["1"] = {"class_type": "UNETLoader", "inputs": {"unet_name": "flux/krea-turbo.safetensors",
+              "weight_dtype": "default"}}
+    r = trace(p, "7")
+    assert r.model_name == "krea-turbo"
+    assert r.model_file == "flux/krea-turbo.safetensors"
+    assert r.model_folder == "diffusion_models"
+
+
+def test_unet_loader_with_model_only_lora():
+    # sampler <- LoraLoaderModelOnly <- UNETLoader (common Flux LoRA wiring)
+    p = _base()
+    p["1"] = {"class_type": "UNETLoader", "inputs": {"unet_name": "krea.safetensors", "weight_dtype": "default"}}
+    p["8"] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["1", 0],
+              "lora_name": "styleFlux.safetensors", "strength_model": 0.9}}
+    p["4"]["inputs"]["model"] = ["8", 0]
+    r = trace(p, "7")
+    assert r.model_name == "krea" and r.model_folder == "diffusion_models"
+    assert [lo["name"] for lo in r.loras] == ["styleFlux"]

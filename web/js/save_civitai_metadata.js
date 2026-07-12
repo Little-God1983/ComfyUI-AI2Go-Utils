@@ -13,7 +13,13 @@ const { app } = window.comfyAPI.app;
 const NODE_IDS = ["AI2GoSaveCivitaiMetadata", "AI2GoSaveCivitaiMetadataAdvanced"];
 const SAMPLER_CLASSES = new Set(["KSampler", "KSamplerAdvanced", "SamplerCustom", "SamplerCustomAdvanced"]);
 const CLIP_CLASSES = new Set(["CLIPTextEncode"]);
-const CHECKPOINT_CLASSES = new Set(["CheckpointLoaderSimple", "CheckpointLoader", "unCLIPCheckpointLoader"]);
+// class_type -> widget holding the model filename (mirror of tracer.MODEL_SOURCES; the Python side
+// also tracks the folder for hashing, which the preview doesn't need). Covers checkpoints and
+// standalone diffusion models (UNETLoader "Load Diffusion Model" — Flux/SD3/Krea/etc.).
+const MODEL_SOURCES = {
+  CheckpointLoaderSimple: "ckpt_name", CheckpointLoader: "ckpt_name", unCLIPCheckpointLoader: "ckpt_name",
+  UNETLoader: "unet_name", UnetLoaderGGUF: "unet_name", UnetLoaderGGUFAdvanced: "unet_name",
+};
 const LORA_CLASSES = new Set(["LoraLoader", "LoraLoaderModelOnly"]);
 const BATCH_CLASS = "AI2GoPromptBatch";
 
@@ -133,9 +139,9 @@ function traceLive(node) {
       const name = widget(cur, "lora_name");
       if (typeof name === "string") r.loras.push({ name: stem(name), strength: widget(cur, "strength_model") });
       cur = originNode(cur, "model");
-    } else if (CHECKPOINT_CLASSES.has(cls)) {
-      const ck = widget(cur, "ckpt_name");
-      if (typeof ck === "string") r.model_name = stem(ck);
+    } else if (MODEL_SOURCES[cls]) {
+      const name = widget(cur, MODEL_SOURCES[cls]);
+      if (typeof name === "string") r.model_name = stem(name);
       break;
     } else {
       cur = originNode(cur, "model");
@@ -190,16 +196,43 @@ app.registerExtension({
     ensureStyles();
     chainCallback(nodeType.prototype, "onNodeCreated", function () {
       const node = this;
-      const panel = document.createElement("div");
-      panel.className = "ai2go-scm";
-      panel.textContent = 'Press "🔎 Test detection" to preview what will be saved.';
+      const panel = document.createElement("div");        // widget root; ComfyUI pins its height each frame
+      const content = document.createElement("div");      // natural-height content we measure
+      content.className = "ai2go-scm";
+      content.textContent = 'Press "🔎 Test detection" to preview what will be saved.';
+      panel.appendChild(content);
+
       const btn = node.addWidget("button", "🔎 Test detection", null, () => {
-        try { renderPreview(panel, traceLive(node)); }
-        catch (e) { panel.textContent = "Trace error: " + e.message; }
-        node.setDirtyCanvas?.(true, true);
+        try { renderPreview(content, traceLive(node)); }
+        catch (e) { content.textContent = "Trace error: " + e.message; }
+        fit();
       });
       btn.serialize = false;
-      node.addDOMWidget("scm_preview", "info", panel, { serialize: false });
+
+      const w = node.addDOMWidget("scm_preview", "info", panel, { serialize: false });
+
+      // Reserve the content's natural height so the node grows to fit its text (measured, like the
+      // Prompt Batch rows editor) — otherwise ComfyUI gives the DOM widget a fixed height and the
+      // preview overflows below the node border. Measure `content` (not the pinned `panel`) to avoid
+      // a grow-by-its-own-padding feedback loop.
+      function fit() {
+        const h = Math.max(content.scrollHeight, 8);
+        w.computeSize = () => [node.size?.[0] || 320, h + 8];
+        const want = node.computeSize?.();
+        if (want) node.setSize([node.size[0], want[1]]);
+        node.setDirtyCanvas?.(true, true);
+      }
+      w.computeSize = () => [node.size?.[0] || 320, Math.max(content.scrollHeight, 8) + 8];
+
+      // The element attaches after onNodeCreated, so observe it and re-fit the moment it gains (or
+      // changes) its natural height — self-corrects with no user interaction.
+      let lastH = 0;
+      const ro = new ResizeObserver(() => {
+        const h = content.scrollHeight;
+        if (h && h !== lastH) { lastH = h; fit(); }
+      });
+      ro.observe(content);
+      chainCallback(node, "onRemoved", () => ro.disconnect());
     });
   },
 });
