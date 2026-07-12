@@ -50,6 +50,16 @@ function bfsBack(node, classSet) {
   return null;
 }
 
+// Current line of our AI2GoPromptBatch node at the given output slot (0=positive, 1=negative).
+function batchRow(origin, slot) {
+  const idx = parseInt(widget(origin, "index"), 10) || 0;
+  let rows = origin._pbRows;
+  if (!rows) { try { rows = JSON.parse(widget(origin, "prompts_json") || "[]"); } catch { rows = []; } }
+  if (!rows.length) return null;
+  const row = rows[Math.max(0, Math.min(idx, rows.length - 1))];
+  return slot === 1 ? (row.negative || "") : (row.positive || "");
+}
+
 // Resolve a CLIPTextEncode's text: static widget, our batch node (by output slot), or a plain string node.
 function resolveClipText(node) {
   const t = widget(node, "text");
@@ -59,21 +69,31 @@ function resolveClipText(node) {
   const origin = node.graph.getNodeById(link.origin_id);
   if (!origin) return { text: "", ok: false };
   if ((origin.comfyClass || origin.type) === BATCH_CLASS) {
-    // Live batch node: prefer its current rows at the current index; fall back to prompts_json.
-    const idx = parseInt(widget(origin, "index"), 10) || 0;
-    let rows = origin._pbRows;
-    if (!rows) {
-      try { rows = JSON.parse(widget(origin, "prompts_json") || "[]"); } catch { rows = []; }
-    }
-    if (!rows.length) return { text: "", ok: false };
-    const row = rows[Math.max(0, Math.min(idx, rows.length - 1))];
-    const slot = link.origin_slot; // 0 = positive, 1 = negative
-    return { text: slot === 1 ? (row.negative || "") : (row.positive || ""), ok: true };
+    const v = batchRow(origin, link.origin_slot);
+    return v == null ? { text: "", ok: false } : { text: v, ok: true };
   }
   for (const w of origin.widgets || []) {
     if (typeof w.value === "string" && w.value.trim()) return { text: w.value, ok: true };
   }
   return { text: "", ok: false };
+}
+
+// Resolve an Advanced-node override socket for the preview.
+// Returns null when the socket is absent or unwired (keep the traced value);
+// {ok:false} when wired but not statically resolvable (it WILL be set at run — not "unresolved").
+function resolveWiredInput(node, name) {
+  const link = inputLink(node, name);
+  if (!link) return null;
+  const origin = node.graph.getNodeById(link.origin_id);
+  if (!origin) return { value: null, ok: false };
+  if ((origin.comfyClass || origin.type) === BATCH_CLASS) {
+    const v = batchRow(origin, link.origin_slot);
+    return v == null ? { value: null, ok: false } : { value: v, ok: true };
+  }
+  for (const w of origin.widgets || []) {
+    if (w.value != null && w.value !== "") return { value: w.value, ok: true };
+  }
+  return { value: null, ok: false };
 }
 
 function traceLive(node) {
@@ -120,6 +140,15 @@ function traceLive(node) {
     }
   }
   r.loras.reverse();
+
+  // Advanced node: a wired override socket wins over the trace (mirrors _save_with_metadata).
+  for (const name of ["positive", "negative", "steps", "cfg", "seed", "sampler_name", "scheduler"]) {
+    const res = resolveWiredInput(node, name);
+    if (!res) continue;
+    const u = r.unresolved.indexOf(name);
+    if (u >= 0) r.unresolved.splice(u, 1);
+    r[name] = res.ok ? res.value : "(wired — resolved at run)";
+  }
   return r;
 }
 
@@ -137,14 +166,14 @@ function ensureStyles() {
 }
 
 function renderPreview(el, r) {
-  const loras = r.loras.length ? r.loras.map((l) => `<${l.name}:${l.strength}>`).join(" ") : "(none)";
+  const loras = r.loras.length ? r.loras.map((l) => `<${escapeHtml(l.name)}:${l.strength}>`).join(" ") : "(none)";
   const warn = r.unresolved.length ? `\n⚠ unresolved: ${r.unresolved.join(", ")} — wire the Advanced node's socket(s).` : "";
   el.innerHTML =
     `<span class="pos">positive</span>: ${escapeHtml(r.positive) || "(empty)"}\n` +
     `<span class="neg">negative</span>: ${escapeHtml(r.negative) || "(empty)"}\n` +
     `<span class="k">steps</span> ${r.steps} · <span class="k">cfg</span> ${r.cfg} · ` +
-    `<span class="k">sampler</span> ${r.sampler_name}/${r.scheduler} · <span class="k">seed</span> ${r.seed}\n` +
-    `<span class="k">model</span> ${r.model_name ?? "(?)"} · <span class="k">loras</span> ${loras}\n` +
+    `<span class="k">sampler</span> ${escapeHtml(r.sampler_name)}/${escapeHtml(r.scheduler)} · <span class="k">seed</span> ${r.seed}\n` +
+    `<span class="k">model</span> ${escapeHtml(r.model_name ?? "(?)")} · <span class="k">loras</span> ${loras}\n` +
     `<span class="k">size</span> from image at run · hashes computed on save` +
     (warn ? `<span class="warn">${escapeHtml(warn)}</span>` : "");
 }
