@@ -6,6 +6,7 @@
 #
 # This file is built up across three concerns: (1) sampler detection + scalar fields, (2) prompt
 # resolution (incl. our AI2GoPromptBatch), (3) the model/LoRA chain.
+import os
 from dataclasses import dataclass, field
 
 from ..prompt_batch_core import parse_prompts, select_prompt
@@ -13,6 +14,8 @@ from ..prompt_batch_core import parse_prompts, select_prompt
 SAMPLER_CLASSES = {"KSampler", "KSamplerAdvanced", "SamplerCustom", "SamplerCustomAdvanced"}
 CLIP_ENCODE_CLASSES = {"CLIPTextEncode"}
 BATCH_CLASS = "AI2GoPromptBatch"
+CHECKPOINT_CLASSES = {"CheckpointLoaderSimple", "CheckpointLoader", "unCLIPCheckpointLoader"}
+LORA_CLASSES = {"LoraLoader", "LoraLoaderModelOnly"}
 
 
 @dataclass
@@ -162,6 +165,42 @@ def _resolve_prompts(prompt, sampler, r):
         r.unresolved.append("negative")
 
 
+def _stem(name):
+    return os.path.splitext(os.path.basename(str(name).replace("\\", "/")))[0]
+
+
+def _trace_model_chain(prompt, sampler, r):
+    model = sampler.get("inputs", {}).get("model")
+    nid = str(model[0]) if _is_link(model) else None
+    seen = set()
+    while nid and nid not in seen:
+        seen.add(nid)
+        node = _node(prompt, nid)
+        if not node:
+            break
+        cls = node.get("class_type")
+        ins = node.get("inputs", {})
+        if cls in LORA_CLASSES:
+            name = ins.get("lora_name")
+            strength = ins.get("strength_model", ins.get("strength"))
+            if isinstance(name, str):
+                r.loras.append({"name": _stem(name),
+                                "strength": None if _is_link(strength) else strength,
+                                "file": name})
+            nxt = ins.get("model")
+            nid = str(nxt[0]) if _is_link(nxt) else None
+            continue
+        if cls in CHECKPOINT_CLASSES:
+            ck = ins.get("ckpt_name")
+            if isinstance(ck, str):
+                r.model_name = _stem(ck)
+                r.model_file = ck
+            break
+        nxt = ins.get("model")  # pass-through node (e.g. ModelSamplingDiscrete)
+        nid = str(nxt[0]) if _is_link(nxt) else None
+    r.loras.reverse()  # collected sampler->checkpoint; emit in load order
+
+
 def trace(prompt, node_id):
     r = TraceResult()
     prompt = prompt or {}
@@ -180,5 +219,5 @@ def trace(prompt, node_id):
 
     _read_sampler_fields(sampler, r)
     _resolve_prompts(prompt, sampler, r)
-    # Task 8 extends here: _trace_model_chain(prompt, sampler, r).
+    _trace_model_chain(prompt, sampler, r)
     return r
