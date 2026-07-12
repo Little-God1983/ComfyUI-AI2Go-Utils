@@ -1,5 +1,4 @@
 # Integration test for the Save Metadata (Civitai) nodes — part of ComfyUI-AI2Go-Utils. GPL-3.0.
-import os
 import pytest
 
 pytest.importorskip("comfy_api")  # only runs inside a ComfyUI environment

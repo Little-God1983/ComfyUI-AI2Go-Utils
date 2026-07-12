@@ -26,13 +26,9 @@ Control Mode" setting. The current index is also emitted as an ``index`` output 
 suffix. Parsing here is authoritative and mirrored in the JS — keep the two in sync.
 """
 
-import logging
-
 from comfy_api.latest import io
 
 from .prompt_batch_core import DEFAULT_PROMPTS_JSON, parse_prompts as _parse_prompts, select_prompt as _select
-
-logger = logging.getLogger(__name__)
 
 
 class AI2GoPromptBatch(io.ComfyNode):
