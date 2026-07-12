@@ -26,6 +26,53 @@ MODEL_SOURCES = {
     "UnetLoaderGGUFAdvanced": ("unet_name", "diffusion_models"),
 }
 LORA_CLASSES = {"LoraLoader", "LoraLoaderModelOnly"}
+# rgthree Power Lora Loader packs many loras into one node: inputs `lora_1`, `lora_2`, … each a dict
+# {on, lora, strength, strengthTwo}. Mirrored in web/js/save_civitai_metadata.js.
+POWER_LORA_CLASSES = {"Power Lora Loader (rgthree)"}
+# rgthree Lora Loader Stack is flatter: paired inputs `lora_01`/`strength_01` … up to four slots.
+LORA_STACK_CLASSES = {"Lora Loader Stack (rgthree)"}
+
+
+def _lora_stack_entries(ins):
+    """Enabled loras from an rgthree Lora Loader Stack, ordered by slot number.
+
+    Skips "None"/blank slots and (matching rgthree) zero-strength slots — those aren't loaded, so
+    they never touch the image and shouldn't appear in the metadata.
+    """
+    out = []
+    nums = [str(k)[5:] for k in ins if str(k).startswith("lora_") and str(k)[5:].isdigit()]
+    for num in sorted(nums, key=int):
+        name = ins.get("lora_" + num)
+        if not isinstance(name, str) or not name or name == "None":
+            continue
+        strength = ins.get("strength_" + num)
+        if not _is_link(strength) and strength == 0:
+            continue
+        out.append({"name": _stem(name),
+                    "strength": None if _is_link(strength) else strength,
+                    "file": name})
+    return out
+
+
+def _power_lora_entries(ins):
+    """Enabled loras from an rgthree Power Lora Loader's inputs, in listed order.
+
+    Matches rgthree's own rule: keys prefixed ``lora_`` whose value is a dict; skip disabled (``on``
+    is False) and empty ("None"/blank) slots. The prefix + dict shape naturally excludes the header
+    widget / "Add Lora" entries.
+    """
+    out = []
+    for k, v in ins.items():
+        if not (isinstance(v, dict) and str(k).upper().startswith("LORA_")):
+            continue
+        name = v.get("lora")
+        if not isinstance(name, str) or not name or name == "None" or v.get("on") is False:
+            continue
+        strength = v.get("strength")
+        out.append({"name": _stem(name),
+                    "strength": None if _is_link(strength) else strength,
+                    "file": name})
+    return out
 
 
 @dataclass
@@ -198,6 +245,14 @@ def _trace_model_chain(prompt, sampler, r):
                 r.loras.append({"name": _stem(name),
                                 "strength": None if _is_link(strength) else strength,
                                 "file": name})
+            nxt = ins.get("model")
+            nid = str(nxt[0]) if _is_link(nxt) else None
+            continue
+        if cls in POWER_LORA_CLASSES or cls in LORA_STACK_CLASSES:
+            entries = _power_lora_entries(ins) if cls in POWER_LORA_CLASSES else _lora_stack_entries(ins)
+            # Reversed within the node so the final r.loras.reverse() restores listed order.
+            for lo in reversed(entries):
+                r.loras.append(lo)
             nxt = ins.get("model")
             nid = str(nxt[0]) if _is_link(nxt) else None
             continue

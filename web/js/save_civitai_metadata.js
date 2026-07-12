@@ -21,6 +21,11 @@ const MODEL_SOURCES = {
   UNETLoader: "unet_name", UnetLoaderGGUF: "unet_name", UnetLoaderGGUFAdvanced: "unet_name",
 };
 const LORA_CLASSES = new Set(["LoraLoader", "LoraLoaderModelOnly"]);
+// rgthree Power Lora Loader packs many loras into one node; each lora widget's value is a dict
+// {on, lora, strength, strengthTwo}. Mirror of tracer.POWER_LORA_CLASSES.
+const POWER_LORA_CLASSES = new Set(["Power Lora Loader (rgthree)"]);
+// rgthree Lora Loader Stack: flat lora_0N / strength_0N widget pairs. Mirror of tracer.LORA_STACK_CLASSES.
+const LORA_STACK_CLASSES = new Set(["Lora Loader Stack (rgthree)"]);
 const BATCH_CLASS = "AI2GoPromptBatch";
 
 // --- Live-graph link helpers (LiteGraph). node.inputs[i].link -> graph.links[id] -> {origin_id, origin_slot}.
@@ -39,6 +44,39 @@ function widget(node, name) {
   return node.widgets?.find((w) => w.name === name)?.value;
 }
 const stem = (s) => String(s).replace(/\\/g, "/").split("/").pop().replace(/\.[^.]+$/, "");
+
+// Enabled loras from a live rgthree Power Lora Loader node, in listed order. Each lora row widget
+// holds a {on, lora, strength, strengthTwo} value; skip disabled and empty ("None"/blank) slots.
+function powerLoraEntries(node) {
+  const out = [];
+  for (const w of node.widgets || []) {
+    const v = w?.value;
+    if (!v || typeof v !== "object" || typeof v.lora !== "string") continue;
+    if (!v.lora || v.lora === "None" || v.on === false) continue;
+    out.push({ name: stem(v.lora), strength: v.strength });
+  }
+  return out;
+}
+
+// Enabled loras from a live rgthree Lora Loader Stack node (flat lora_0N / strength_0N pairs), ordered
+// by slot number; skip "None"/blank and zero-strength slots (rgthree won't load those).
+function loraStackEntries(node) {
+  const slots = [];
+  for (const w of node.widgets || []) {
+    const m = /^lora_(\d+)$/.exec(w?.name || "");
+    if (m) slots.push({ n: parseInt(m[1], 10), num: m[1] });
+  }
+  slots.sort((a, b) => a.n - b.n);
+  const out = [];
+  for (const s of slots) {
+    const name = widget(node, "lora_" + s.num);
+    if (typeof name !== "string" || !name || name === "None") continue;
+    const strength = widget(node, "strength_" + s.num);
+    if (strength === 0) continue;
+    out.push({ name: stem(name), strength });
+  }
+  return out;
+}
 
 function bfsBack(node, classSet) {
   const seen = new Set();
@@ -139,6 +177,11 @@ function traceLive(node) {
       const name = widget(cur, "lora_name");
       if (typeof name === "string") r.loras.push({ name: stem(name), strength: widget(cur, "strength_model") });
       cur = originNode(cur, "model");
+    } else if (POWER_LORA_CLASSES.has(cls) || LORA_STACK_CLASSES.has(cls)) {
+      // Reversed within the node so the final r.loras.reverse() restores listed order.
+      const entries = POWER_LORA_CLASSES.has(cls) ? powerLoraEntries(cur) : loraStackEntries(cur);
+      for (const lo of entries.reverse()) r.loras.push(lo);
+      cur = originNode(cur, "model");
     } else if (MODEL_SOURCES[cls]) {
       const name = widget(cur, MODEL_SOURCES[cls]);
       if (typeof name === "string") r.model_name = stem(name);
@@ -173,9 +216,17 @@ function ensureStyles() {
   document.head.appendChild(s);
 }
 
+// positive/negative can be filled at run time (e.g. by the AI2Go Prompt Batch node walking its rows),
+// so "empty in the preview" is not necessarily a problem — say so, rather than only "wire the socket".
+const RUNTIME_FIELDS = new Set(["positive", "negative"]);
+
 function renderPreview(el, r) {
   const loras = r.loras.length ? r.loras.map((l) => `<${escapeHtml(l.name)}:${l.strength}>`).join(" ") : "(none)";
-  const warn = r.unresolved.length ? `\n⚠ unresolved: ${r.unresolved.join(", ")} — wire the Advanced node's socket(s).` : "";
+  const runtime = r.unresolved.filter((u) => RUNTIME_FIELDS.has(u));
+  const hard = r.unresolved.filter((u) => !RUNTIME_FIELDS.has(u));
+  let warn = "";
+  if (runtime.length) warn += `\n⚠ ${runtime.join(", ")}: empty in preview — resolved at run if driven by the AI2Go Prompt Batch node (or wire the Advanced socket).`;
+  if (hard.length) warn += `\n⚠ unresolved: ${hard.join(", ")} — wire the Advanced node's socket(s).`;
   el.innerHTML =
     `<span class="pos">positive</span>: ${escapeHtml(r.positive) || "(empty)"}\n` +
     `<span class="neg">negative</span>: ${escapeHtml(r.negative) || "(empty)"}\n` +

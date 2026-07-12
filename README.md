@@ -202,6 +202,12 @@ for dynamic/batch prompts: no static-graph guessing, just the string that actual
 LoRAs are always auto-traced on both nodes — a variable-length LoRA chain isn't practical to socket,
 and it's static graph data regardless of which prompt ran.
 
+The model/LoRA walk recognizes checkpoints and standalone diffusion models (**Load Diffusion Model** /
+GGUF unet loaders), and picks up LoRAs from ComfyUI's stock **Load LoRA** (`LoraLoader` /
+`LoraLoaderModelOnly`) as well as rgthree's **Power Lora Loader** and **Lora Loader Stack** — including
+several LoRAs in one node. Disabled rows and empty (`None`) / zero-strength slots are skipped, matching
+what actually loads.
+
 #### What gets written
 
 One `parameters` chunk, A1111 order:
