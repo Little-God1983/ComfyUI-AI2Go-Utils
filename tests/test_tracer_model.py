@@ -62,6 +62,55 @@ def test_unet_loader_diffusion_model():
     assert r.model_folder == "diffusion_models"
 
 
+def test_power_lora_loader_rgthree_multiple():
+    # rgthree Power Lora Loader packs several loras into one node as lora_N dicts.
+    p = _base()
+    p["8"] = {"class_type": "Power Lora Loader (rgthree)", "inputs": {
+        "model": ["1", 0], "clip": ["1", 1],
+        "PowerLoraLoaderHeaderWidget": {"type": "PowerLoraLoaderHeaderWidget"},
+        "lora_1": {"on": True, "lora": "styleA.safetensors", "strength": 0.8, "strengthTwo": None},
+        "lora_2": {"on": True, "lora": "sub/styleB.safetensors", "strength": 0.5, "strengthTwo": None},
+        "lora_3": {"on": False, "lora": "disabledLora.safetensors", "strength": 1.0, "strengthTwo": None},
+        "lora_4": {"on": True, "lora": "None", "strength": 1.0, "strengthTwo": None},
+        "➕ Add Lora": ""}}
+    p["4"]["inputs"]["model"] = ["8", 0]  # sampler <- PowerLora <- checkpoint
+    r = trace(p, "7")
+    assert r.model_name == "myCkpt"
+    # enabled real loras only (disabled + empty "None" slot skipped), in listed order.
+    assert [(lo["name"], lo["strength"], lo["file"]) for lo in r.loras] == [
+        ("styleA", 0.8, "styleA.safetensors"), ("styleB", 0.5, "sub/styleB.safetensors")]
+
+
+def test_power_lora_loader_mixed_with_standard_load_order():
+    # PowerLora(A,B) closest to sampler, a standard LoraLoader(C) closest to the checkpoint.
+    p = _base()
+    p["8"] = {"class_type": "LoraLoader", "inputs": {"model": ["1", 0], "clip": ["1", 1],
+              "lora_name": "C.safetensors", "strength_model": 1.0, "strength_clip": 1.0}}
+    p["9"] = {"class_type": "Power Lora Loader (rgthree)", "inputs": {
+        "model": ["8", 0], "clip": ["8", 1],
+        "lora_1": {"on": True, "lora": "A.safetensors", "strength": 0.8},
+        "lora_2": {"on": True, "lora": "B.safetensors", "strength": 0.6}}}
+    p["4"]["inputs"]["model"] = ["9", 0]  # sampler <- PowerLora(A,B) <- LoraLoader(C) <- ckpt
+    r = trace(p, "7")
+    # load order = nearest checkpoint first: C, then the power loader's A, B.
+    assert [lo["name"] for lo in r.loras] == ["C", "A", "B"]
+
+
+def test_lora_loader_stack_rgthree():
+    # rgthree Lora Loader Stack: flat lora_0N / strength_0N pairs.
+    p = _base()
+    p["8"] = {"class_type": "Lora Loader Stack (rgthree)", "inputs": {
+        "model": ["1", 0], "clip": ["1", 1],
+        "lora_01": "A.safetensors", "strength_01": 0.8,
+        "lora_02": "sub/B.safetensors", "strength_02": 0.5,
+        "lora_03": "None", "strength_03": 1.0,          # empty slot skipped
+        "lora_04": "zero.safetensors", "strength_04": 0}}  # zero strength skipped (rgthree won't load it)
+    p["4"]["inputs"]["model"] = ["8", 0]
+    r = trace(p, "7")
+    assert [(lo["name"], lo["strength"], lo["file"]) for lo in r.loras] == [
+        ("A", 0.8, "A.safetensors"), ("B", 0.5, "sub/B.safetensors")]
+
+
 def test_unet_loader_with_model_only_lora():
     # sampler <- LoraLoaderModelOnly <- UNETLoader (common Flux LoRA wiring)
     p = _base()
