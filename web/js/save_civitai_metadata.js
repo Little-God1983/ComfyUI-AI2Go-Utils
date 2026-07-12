@@ -57,7 +57,9 @@ function batchRow(origin, slot) {
   if (!rows) { try { rows = JSON.parse(widget(origin, "prompts_json") || "[]"); } catch { rows = []; } }
   if (!rows.length) return null;
   const row = rows[Math.max(0, Math.min(idx, rows.length - 1))];
-  return slot === 1 ? (row.negative || "") : (row.positive || "");
+  if (slot === 0) return row.positive || "";
+  if (slot === 1) return row.negative || "";
+  return null; // any other slot (e.g. the Int `index` output) is not a prompt
 }
 
 // Resolve a CLIPTextEncode's text: static widget, our batch node (by output slot), or a plain string node.
@@ -171,8 +173,8 @@ function renderPreview(el, r) {
   el.innerHTML =
     `<span class="pos">positive</span>: ${escapeHtml(r.positive) || "(empty)"}\n` +
     `<span class="neg">negative</span>: ${escapeHtml(r.negative) || "(empty)"}\n` +
-    `<span class="k">steps</span> ${r.steps} · <span class="k">cfg</span> ${r.cfg} · ` +
-    `<span class="k">sampler</span> ${escapeHtml(r.sampler_name)}/${escapeHtml(r.scheduler)} · <span class="k">seed</span> ${r.seed}\n` +
+    `<span class="k">steps</span> ${escapeHtml(r.steps)} · <span class="k">cfg</span> ${escapeHtml(r.cfg)} · ` +
+    `<span class="k">sampler</span> ${escapeHtml(r.sampler_name)}/${escapeHtml(r.scheduler)} · <span class="k">seed</span> ${escapeHtml(r.seed)}\n` +
     `<span class="k">model</span> ${escapeHtml(r.model_name ?? "(?)")} · <span class="k">loras</span> ${loras}\n` +
     `<span class="k">size</span> from image at run · hashes computed on save` +
     (warn ? `<span class="warn">${escapeHtml(warn)}</span>` : "");
