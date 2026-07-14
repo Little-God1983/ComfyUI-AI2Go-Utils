@@ -16,13 +16,13 @@ ComfyUI nodepack by AIKnowledge2Go
 > I'm building a new one. Please give me a little time. ❤️ 
 > I won't upload the old ❌📹 videos. They are available for patreon members.
 
-- **📹 New Youtube:** [Into The Latent]https://www.youtube.com/@IntoTheLatent
-- **📬 Newsletter:** [AI News] https://intothelatent.com/newsletter
-- **🌍 Website:** [Into The Latent]https://intothelatent.com
-- **🌍 Patreon:** [AIKnowledgeCentral](https://patreon.com/AIKnowledgeCentral)
-- **📆 Book an appointment:** [1hr 1-on-1 Stable Diffusion](https://koalendar.com/e/1hr-1-on-1-stable-diffusion)
+- **📹 YouTube:** [Into The Latent](https://www.youtube.com/@IntoTheLatent)
+- **📬 Newsletter:** [AI News](https://intothelatent.com/newsletter)
+- **🌐 Website:** [Into The Latent](https://intothelatent.com)
+- **❤️ Patreon:** [AIKnowledgeCentral](https://patreon.com/AIKnowledgeCentral)
+- **📆 Book a 1-on-1 Session:** [Stable Diffusion Coaching](https://koalendar.com/e/1hr-1-on-1-stable-diffusion)
 - **✉️ Email:** BeyondMatrixDevelopments@gmail.com
-- **🌍 Civitai:** [AIknowlege2go](https://civitai.com/user/AIknowlege2go)
+- **🎨 Civitai:** [AIKnowledge2Go](https://civitai.com/user/AIknowlege2go)
 
 ## Installation
 
