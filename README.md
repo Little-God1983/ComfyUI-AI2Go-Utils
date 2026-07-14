@@ -15,7 +15,7 @@ ComfyUI nodepack by AIKnowledge2Go
 >
 > I'm building a new one. Please give me a little time. ❤️ I won't upload the old videos. They are available for patreon members.
 
-- ** New Youtube :** 
+- ** New Youtube :** https://www.youtube.com/@IntoTheLatent
 - **📬 Newsletter:** https://intothelatent.com/newsletter
 
 - **Patreon:** [AIKnowledgeCentral](https://patreon.com/AIKnowledgeCentral)
