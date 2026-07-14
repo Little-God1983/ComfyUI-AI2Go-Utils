@@ -11,7 +11,7 @@ ComfyUI nodepack by AIKnowledge2Go
 ## Contact
 
 > **⚠️ YouTube:** My YouTube channel is dead:
-> [AIKnowledge2Go IS DEAD]https://www.patreon.com/AIKnowledgeCentral/posts/aiknowledge2go-163707956
+> [AIKnowledge2Go IS DEAD](https://www.patreon.com/AIKnowledgeCentral/posts/aiknowledge2go-163707956)
 >
 > I'm building a new one. Please give me a little time. ❤️ 
 > I won't upload the old ❌📹 videos. They are available for patreon members.
