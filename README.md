@@ -10,7 +10,14 @@ ComfyUI nodepack by AIKnowledge2Go
 
 ## Contact
 
-- **YouTube:** [@AIKnowledge2Go](https://www.youtube.com/@AIKnowledge2Go)
+> **⚠️ YouTube:** My YouTube channel is dead. Read why here:
+> https://www.patreon.com/AIKnowledgeCentral/posts/aiknowledge2go-163707956
+>
+> I'm building a new one. Please give me a little time. ❤️ I won't upload the old videos. They are available for patreon members.
+
+- ** New Youtube :** 
+- **📬 Newsletter:** https://intothelatent.com/newsletter
+
 - **Patreon:** [AIKnowledgeCentral](https://patreon.com/AIKnowledgeCentral)
 - **Book an appointment:** [1hr 1-on-1 Stable Diffusion](https://koalendar.com/e/1hr-1-on-1-stable-diffusion)
 - **Email:** BeyondMatrixDevelopments@gmail.com
