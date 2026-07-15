@@ -79,9 +79,24 @@ produced by the flip button, never listed separately.
 | 21:9 | Cinemascope   | 9:21 Portrait Cinemascope |
 | 3:1  | Wide Panorama | 1:3 Portrait Wide Panorama |
 
-- Combo **options are the label strings** (e.g. `"16:9 (Widescreen)"`); a parser extracts the
-  leading `W:H` for the math. This keeps a single source of truth in the options list.
-- Both Python and JS keep an identical ordered list `ASPECT_PRESETS` of `(ratio, name)` pairs.
+**Single source of truth.** Both Python and JS keep one identical ordered list of `(ratio, name)`
+pairs (square + landscape only, `W ≥ H`):
+
+```
+ASPECT_PRESETS = [("1:1","Square"), ("5:4","Large Format"), ("4:3","Standard"),
+                  ("3:2","Photo"), ("16:10","Monitor"), ("16:9","Widescreen"),
+                  ("2:1","Panorama"), ("21:9","Cinemascope"), ("3:1","Wide Panorama")]
+```
+
+- **Combo options are the label strings** built from the list (e.g. `"16:9 (Widescreen)"`).
+  ComfyUI serializes the selected option string as-is (no native display/value split), so the
+  saved value is the label; the code maps label → `"16:9"` for the math via `ASPECT_PRESETS`.
+- **1:1 appears exactly once** — portrait ratios are *not* listed; the flip button (section 3)
+  produces them. No `1:1 / 1:1` duplicate.
+- **Backward compatibility:** on load, a stored value that is a bare `"W:H"` (e.g. `"16:9"` from a
+  pre-change workflow) or any label whose leading ratio matches a preset is remapped to the
+  current labeled option, so old workflows don't reset to the default. Applied in both the JS
+  `onConfigure` path and Python's `execute` (Python tolerates a bare ratio or a labeled string).
 
 ## 3. Flip button + orientation state
 
@@ -143,6 +158,8 @@ Comfy-free, run with `pytest` from repo root (torch/ComfyUI not required for the
   taller-than-wide result); landscape gives wider-than-tall.
 - Ideogram 4 still clamps + would-warn: a 4000-wide 16:9 request clamps to 2048×1152.
 - New 21:9 / (flipped) 9:21 resolve to the correct ratios.
+- Backward compat: `execute` accepts a bare `"16:9"` (old workflow value) and a labeled
+  `"16:9 (Widescreen)"` and resolves both to the same ratio.
 
 JS gets a syntax/ESM check only (per dev-env note); live browser checks deferred to the user.
 
