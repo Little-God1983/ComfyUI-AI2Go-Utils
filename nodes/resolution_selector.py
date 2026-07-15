@@ -51,19 +51,12 @@ the builder's canvas live (they also apply on execution).""",
                 io.Combo.Input("profile", options=list(PROFILES.keys()), default=DEFAULT_PROFILE,
                                tooltip="Model ruleset. 'default' = no clamp, snaps to 'snap_multiple'. "
                                        "'Ideogram 4' = multiples of 16, 256-2048 px."),
-                io.Int.Input("snap_multiple", default=8, min=1, max=1024, step=1,
-                             tooltip="Round each side to a multiple of this. Most diffusion models require "
-                                     "multiples of 8, so keep it at 8 unless your model needs otherwise. "
-                                     "Ignored by model profiles that define their own multiple (Ideogram 4 = 16)."),
                 io.Combo.Input("resolution_mode", options=["raw", "auto", "megapixel"], default="raw",
                                tooltip="'raw' = type width/height; 'auto' = pick a ratio and edit either side; "
                                        "'megapixel' = pick a target megapixels + ratio. All snap to the profile."),
                 io.Combo.Input("aspect_ratio", options=aspect_options(), default=_DEFAULT_ASPECT,
                                tooltip="Target aspect ratio for 'auto' and 'megapixel'. Square + landscape only; "
                                        "use the flip button (orientation) for portrait."),
-                io.Combo.Input("orientation", options=["landscape", "portrait"], default="landscape",
-                               tooltip="Landscape or portrait. Toggled by the '⟷' flip button in the editor; "
-                                       "portrait transposes the selected ratio (16:9 -> 9:16)."),
                 io.Float.Input("megapixels", default=1.0, min=0.1, max=16.0, step=0.1,
                                tooltip="Target size in megapixels for 'megapixel' mode. (Ideogram 4 still clamps "
                                        "to ~4.19 MP at 2048x2048.)"),
@@ -71,6 +64,13 @@ the builder's canvas live (they also apply on execution).""",
                              tooltip="Width. Editable in 'raw' and 'auto'; computed in 'megapixel'. Snapped to the multiple."),
                 io.Int.Input("height", default=1024, min=64, max=16384, step=8,
                              tooltip="Height. Editable in 'raw' and 'auto'; computed in 'megapixel'. Snapped to the multiple."),
+                io.Int.Input("snap_multiple", default=8, min=1, max=1024, step=1,
+                             tooltip="Round each side to a multiple of this. Most diffusion models require "
+                                     "multiples of 8, so keep it at 8 unless your model needs otherwise. "
+                                     "Ignored by model profiles that define their own multiple (Ideogram 4 = 16)."),
+                io.Combo.Input("orientation", options=["landscape", "portrait"], default="landscape",
+                               tooltip="Landscape or portrait. Toggled by the '⟷' flip button in the editor; "
+                                       "portrait transposes the selected ratio (16:9 -> 9:16)."),
             ],
             outputs=[
                 io.Int.Output(display_name="width"),

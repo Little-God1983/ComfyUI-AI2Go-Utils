@@ -29,7 +29,7 @@ const ASPECT_PRESETS = [
 ];
 const aspectLabel = (r, n) => `${r} (${n})`;
 
-const parseAR = (s) => { const m = /(\d+)\s*:\s*(\d+)/.exec(String(s || "")); return m ? (+m[1]) / (+m[2]) : 1; };
+const parseAR = (s) => { const m = /^\s*(\d+)\s*:\s*(\d+)/.exec(String(s || "")); return m && +m[2] ? (+m[1]) / (+m[2]) : 1; };
 const effAR = (aspect, orient) => { const ar = parseAR(aspect); return (orient === "portrait" && ar) ? 1 / ar : ar; };
 const profClamps = (name) => (PROFILES[name] || PROFILES[DEFAULT_PROFILE]).max < BIG;
 function effRules(name, snapMult) {

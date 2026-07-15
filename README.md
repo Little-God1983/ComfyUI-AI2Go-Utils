@@ -199,7 +199,7 @@ a connected **Ideogram 4 Prompt Builder**.
   workflow.
 - **Modes** — `raw` (type width/height), `auto` (pick a ratio; edit one side, the other follows),
   `megapixel` (target megapixels + ratio; both computed).
-- **Aspect ratios** — named presets from **1:1 (Square)** through **21:9 (Cinemascope)**. The list is
+- **Aspect ratios** — named presets from **1:1 (Square)** to **3:1 (Wide Panorama)**, including **21:9 (Cinemascope)**. The list is
   square + landscape only; the **`⟷` flip button** transposes to portrait (16:9 → 9:16) and swaps
   width/height, so there's no duplicated 1:1.
 - The readout shows the resulting **W × H**, megapixels, and the effective ratio + orientation. Wire

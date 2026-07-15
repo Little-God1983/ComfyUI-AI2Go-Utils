@@ -75,3 +75,21 @@ def test_aspect_options_shape():
     assert len(opts) == 9
     # square + landscape only — no portrait ratios listed
     assert not any(lbl.startswith(("9:16", "2:3", "3:4", "4:5", "1:2", "9:21", "1:3")) for lbl in opts)
+
+
+def test_megapixel_mode_hits_target_and_ratio():
+    # megapixel: default profile, 16:9, 2.0 MP -> ~2 MP at ~16:9, snapped to /8
+    w, h = resolve_dims("default", "megapixel", WS, "landscape", 8, 2.0, 0, 0)
+    assert (w, h) == (1888, 1064)
+
+
+def test_backward_compat_portrait_bare_ratio():
+    # old workflow bare "9:16" with orientation defaulting to landscape still yields portrait dims
+    w, h = resolve_dims("default", "auto", "9:16", "landscape", 8, 1.0, 1080, 0)
+    assert h > w and (w, h) == (1080, 1920)
+
+
+def test_flipped_9_21_portrait():
+    # 21:9 flipped to portrait (9:21) -> tall; 864 and 2016 are both multiples of 8
+    w, h = resolve_dims("default", "auto", "21:9 (Cinemascope)", "portrait", 8, 1.0, 864, 0)
+    assert h > w and (w, h) == (864, 2016)
