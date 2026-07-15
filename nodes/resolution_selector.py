@@ -4,74 +4,26 @@
 #
 """Resolution selector.
 
-Computes a model-valid width/height from one of three modes and a target aspect ratio:
+Computes a valid width/height from one of three modes and a target aspect ratio:
 
-- raw        : type width/height directly (still snapped to the profile's multiple).
+- raw        : type width/height directly (snapped to the profile's / snap_multiple's multiple).
 - auto       : pick an aspect ratio; edit either side and the other follows.
 - megapixel  : pick a target megapixel count + aspect ratio; both sides are computed.
 
-A *profile* selects the rules: the snap multiple and the min/max per side. For now the only
-profile is "Ideogram 4" (multiple of 16, 256-2048 px per side). Outputs width/height as INT so it
-plugs into any workflow; the editor JS adds an "Apply" button that pushes the dims straight into a
-connected AI2Go Ideogram 4 Prompt Builder's canvas (and the dims also flow on graph execution).
+A *profile* selects the rules. "default" does no model clamping (its snap multiple is the
+`snap_multiple` widget, default 8). "Ideogram 4" snaps to 16 and clamps 256-2048 px per side.
+A landscape-only aspect list + an `orientation` toggle (driven by the JS flip button) cover both
+orientations without duplicate entries. All math lives in resolution_core so it is unit-testable
+without ComfyUI, and the editor JS mirrors it.
 """
 
 from comfy_api.latest import io
 
-# Per-profile resolution rules: snap `mult`iple + `min`/`max` per side. Add entries here (and the
-# matching copy in web/js/resolution_selector.js) to support more models.
-PROFILES = {
-    "Ideogram 4": {"mult": 16, "min": 256, "max": 2048},
-}
-DEFAULT_PROFILE = "Ideogram 4"
+from .resolution_core import (
+    ASPECT_PRESETS, DEFAULT_PROFILE, PROFILES, aspect_label, aspect_options, resolve_dims,
+)
 
-# Aspect presets as "W:H" strings (parsed by both this module and the editor JS); landscape → square → portrait.
-ASPECT_PRESETS = ["1:1", "3:2", "4:3", "16:9", "16:10", "5:4", "2:1", "3:1",
-                  "2:3", "3:4", "9:16", "10:16", "4:5", "1:2", "1:3"]
-
-
-def _prof(name):
-    return PROFILES.get(name, PROFILES[DEFAULT_PROFILE])
-
-
-def _parse_ar(s):
-    # "W:H" -> width/height ratio (float); 1.0 on anything malformed.
-    try:
-        a, b = str(s).split(":")
-        a, b = float(a), float(b)
-        return a / b if b else 1.0
-    except Exception:
-        return 1.0
-
-
-def _snap(v, p):
-    # Snap to the profile's multiple and clamp into [min, max].
-    m = p["mult"]
-    return int(min(p["max"], max(p["min"], round(v / m) * m)))
-
-
-def _fit_w(tw, ar, p):
-    # Largest width with aspect `ar` whose width AND height (=width/ar) both fit [min, max], with the
-    # aspect ratio preserved — so hitting the per-side cap keeps the ratio (e.g. 16:9 -> 2048x1152, not
-    # 2048x2048). Aspect is prioritized over hitting an exact target. Snapped to the profile multiple.
-    lo, hi = p["min"], p["max"]
-    wlo, whi = max(lo, lo * ar), min(hi, hi * ar)
-    w = min(hi, max(lo, tw)) if wlo > whi else min(whi, max(wlo, tw))   # wlo>whi: aspect can't fit the range
-    w = _snap(w, p)
-    return w, _snap(w / ar, p)
-
-
-def _resolve_dims(profile, mode, aspect, mp, width, height):
-    # Mirror of the editor JS math so the INT outputs are correct even headless / via the API.
-    p = _prof(profile)
-    if mode == "raw":
-        return _snap(width, p), _snap(height, p)  # raw: literal sides, snapped + per-axis clamped
-    ar = _parse_ar(aspect)
-    if mode == "megapixel":
-        tw = (max(0.0, float(mp)) * 1_000_000.0 * ar) ** 0.5
-    else:                                         # auto: width drives (JS keeps both sides consistent)
-        tw = float(width)
-    return _fit_w(tw, ar, p)                       # aspect preserved when clamped to the cap
+_DEFAULT_ASPECT = aspect_label(*ASPECT_PRESETS[0])   # "1:1 (Square)"
 
 
 class AI2GoResolutionSelector(io.ComfyNode):
@@ -84,30 +36,41 @@ class AI2GoResolutionSelector(io.ComfyNode):
             search_aliases=["resolution", "aspect ratio", "megapixel", "ideogram", "width", "height", "size"],
             is_experimental=True,
             description="""
-Pick a model-valid resolution by mode + aspect ratio, output width/height as INT.
+Pick a valid resolution by mode + aspect ratio, output width/height as INT.
 
-- profile: the model ruleset (Ideogram 4 = multiples of 16, 256-2048 px per side).
+- profile: 'default' (no clamp; snaps to the 'snap_multiple' field) or a model ruleset like
+  'Ideogram 4' (multiples of 16, 256-2048 px per side).
 - resolution_mode: 'raw' (type width/height), 'auto' (pick a ratio; edit one side, the other
   follows), or 'megapixel' (target megapixels + ratio; both computed).
-- aspect_ratio / megapixels feed the auto and megapixel modes.
+- aspect_ratio lists square + landscape ratios; the '⟷' flip button (orientation) makes the
+  portrait versions. megapixels feeds the megapixel mode.
 
-Wire width/height into the AI2Go Ideogram 4 Prompt Builder's width/height inputs; the node's
-"Apply" button pushes the dims into the builder's canvas live (they also apply on execution).""",
+Wire width/height into the AI2Go Ideogram 4 Prompt Builder's width/height inputs; edits push into
+the builder's canvas live (they also apply on execution).""",
             inputs=[
                 io.Combo.Input("profile", options=list(PROFILES.keys()), default=DEFAULT_PROFILE,
-                               tooltip="Model ruleset that governs the snap multiple and the min/max per side. "
-                                       "Ideogram 4 = multiples of 16, 256-2048 px."),
+                               tooltip="Model ruleset. 'default' = no clamp, snaps to 'snap_multiple'. "
+                                       "'Ideogram 4' = multiples of 16, 256-2048 px."),
+                io.Int.Input("snap_multiple", default=8, min=1, max=1024, step=1,
+                             tooltip="Round each side to a multiple of this. Most diffusion models require "
+                                     "multiples of 8, so keep it at 8 unless your model needs otherwise. "
+                                     "Ignored by model profiles that define their own multiple (Ideogram 4 = 16)."),
                 io.Combo.Input("resolution_mode", options=["raw", "auto", "megapixel"], default="raw",
                                tooltip="'raw' = type width/height; 'auto' = pick a ratio and edit either side; "
                                        "'megapixel' = pick a target megapixels + ratio. All snap to the profile."),
-                io.Combo.Input("aspect_ratio", options=ASPECT_PRESETS, default="1:1",
-                               tooltip="Target aspect ratio (W:H) for 'auto' and 'megapixel' modes."),
-                io.Float.Input("megapixels", default=1.0, min=0.1, max=4.2, step=0.1,
-                               tooltip="Target size in megapixels for 'megapixel' mode (Ideogram 4 caps ~4.19 MP at 2048x2048)."),
+                io.Combo.Input("aspect_ratio", options=aspect_options(), default=_DEFAULT_ASPECT,
+                               tooltip="Target aspect ratio for 'auto' and 'megapixel'. Square + landscape only; "
+                                       "use the flip button (orientation) for portrait."),
+                io.Combo.Input("orientation", options=["landscape", "portrait"], default="landscape",
+                               tooltip="Landscape or portrait. Toggled by the '⟷' flip button in the editor; "
+                                       "portrait transposes the selected ratio (16:9 -> 9:16)."),
+                io.Float.Input("megapixels", default=1.0, min=0.1, max=16.0, step=0.1,
+                               tooltip="Target size in megapixels for 'megapixel' mode. (Ideogram 4 still clamps "
+                                       "to ~4.19 MP at 2048x2048.)"),
                 io.Int.Input("width", default=1024, min=64, max=16384, step=8,
-                             tooltip="Width. Editable in 'raw' and 'auto'; computed in 'megapixel'. Snapped to the profile multiple."),
+                             tooltip="Width. Editable in 'raw' and 'auto'; computed in 'megapixel'. Snapped to the multiple."),
                 io.Int.Input("height", default=1024, min=64, max=16384, step=8,
-                             tooltip="Height. Editable in 'raw' and 'auto'; computed in 'megapixel'. Snapped to the profile multiple."),
+                             tooltip="Height. Editable in 'raw' and 'auto'; computed in 'megapixel'. Snapped to the multiple."),
             ],
             outputs=[
                 io.Int.Output(display_name="width"),
@@ -116,7 +79,9 @@ Wire width/height into the AI2Go Ideogram 4 Prompt Builder's width/height inputs
         )
 
     @classmethod
-    def execute(cls, profile=DEFAULT_PROFILE, resolution_mode="raw", aspect_ratio="1:1",
-                megapixels=1.0, width=1024, height=1024) -> io.NodeOutput:
-        w, h = _resolve_dims(profile, resolution_mode, aspect_ratio, megapixels, width, height)
+    def execute(cls, profile=DEFAULT_PROFILE, snap_multiple=8, resolution_mode="raw",
+                aspect_ratio=_DEFAULT_ASPECT, orientation="landscape", megapixels=1.0,
+                width=1024, height=1024) -> io.NodeOutput:
+        w, h = resolve_dims(profile, resolution_mode, aspect_ratio, orientation,
+                            snap_multiple, megapixels, width, height)
         return io.NodeOutput(w, h)
