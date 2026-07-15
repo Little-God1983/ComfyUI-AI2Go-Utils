@@ -67,10 +67,33 @@ def profile_clamps(name):
     return _prof(name)["max"] < BIG
 
 
+# Widget max for snap_multiple; keep in sync with the io.Int.Input in resolution_selector.py and the
+# clampSnap helper in web/js/resolution_selector.js.
+SNAP_MAX = 1024
+
+
+def clamp_snap_multiple(v):
+    """Coerce the snap_multiple widget value to a usable multiple in [1, SNAP_MAX].
+
+    Anything non-numeric or < 1 heals to the default 8. This matters because a ComfyUI number widget
+    can serialize an empty string (an emptied/uninitialised spinner), and `int('')` then fails
+    ComfyUI's INT validation and rejects the WHOLE node — even for a profile like Ideogram 4 that
+    ignores snap_multiple. Healing to a valid multiple here (and, on the front-end, at serialization)
+    keeps a stray value from ever breaking a profile's output or blocking a queue. Model profiles
+    ignore snap_multiple entirely (see _rules). Mirrors clampSnap in web/js/resolution_selector.js."""
+    try:
+        n = int(float(v))
+    except (TypeError, ValueError):
+        return 8
+    if n < 1:
+        return 8
+    return min(SNAP_MAX, n)
+
+
 def _rules(name, snap_multiple):
     # Effective {mult, min, max}. `default` reads its multiple from the widget; models use their own.
     p = _prof(name)
-    mult = p["mult"] if p["mult"] else max(1, int(snap_multiple or 1))
+    mult = p["mult"] if p["mult"] else clamp_snap_multiple(snap_multiple)
     return {"mult": mult, "min": p["min"], "max": p["max"]}
 
 

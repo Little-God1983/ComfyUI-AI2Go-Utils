@@ -51,7 +51,7 @@ the builder's canvas live (they also apply on execution).""",
                 io.Combo.Input("profile", options=list(PROFILES.keys()), default=DEFAULT_PROFILE,
                                tooltip="Model ruleset. 'default' = no clamp, snaps to 'snap_multiple'. "
                                        "'Ideogram 4' = multiples of 16, 256-2048 px."),
-                io.Combo.Input("resolution_mode", options=["raw", "auto", "megapixel"], default="raw",
+                io.Combo.Input("resolution_mode", options=["raw", "auto", "megapixel"], default="megapixel",
                                tooltip="'raw' = type width/height; 'auto' = pick a ratio and edit either side; "
                                        "'megapixel' = pick a target megapixels + ratio. All snap to the profile."),
                 io.Combo.Input("aspect_ratio", options=aspect_options(), default=_DEFAULT_ASPECT,
@@ -79,7 +79,7 @@ the builder's canvas live (they also apply on execution).""",
         )
 
     @classmethod
-    def execute(cls, profile=DEFAULT_PROFILE, snap_multiple=8, resolution_mode="raw",
+    def execute(cls, profile=DEFAULT_PROFILE, snap_multiple=8, resolution_mode="megapixel",
                 aspect_ratio=_DEFAULT_ASPECT, orientation="landscape", megapixels=1.0,
                 width=1024, height=1024) -> io.NodeOutput:
         w, h = resolve_dims(profile, resolution_mode, aspect_ratio, orientation,

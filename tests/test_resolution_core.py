@@ -1,6 +1,7 @@
 # Tests for the comfy-free resolution core — part of ComfyUI-AI2Go-Utils. GPL-3.0.
 from nodes.resolution_core import (
     resolve_dims, effective_ar, parse_ar, profile_clamps, aspect_options,
+    clamp_snap_multiple,
 )
 
 SQ = "1:1 (Square)"
@@ -93,3 +94,43 @@ def test_flipped_9_21_portrait():
     # 21:9 flipped to portrait (9:21) -> tall; 864 and 2016 are both multiples of 8
     w, h = resolve_dims("default", "auto", "21:9 (Cinemascope)", "portrait", 8, 1.0, 864, 0)
     assert h > w and (w, h) == (864, 2016)
+
+
+# ── snap_multiple robustness (regression: an emptied number widget serialized "" -> the node's
+#    INT validation rejected the whole prompt, blocking even the Ideogram profile that ignores it). ──
+
+def test_clamp_snap_multiple_heals_bad_values_to_default():
+    # Anything non-numeric / < 1 heals to the default 8 so a stray value can never break a profile.
+    assert clamp_snap_multiple("") == 8       # the empty string an emptied number widget serializes
+    assert clamp_snap_multiple(0) == 8
+    assert clamp_snap_multiple(None) == 8
+    assert clamp_snap_multiple(-5) == 8
+    assert clamp_snap_multiple("abc") == 8
+
+
+def test_clamp_snap_multiple_keeps_and_bounds_valid_values():
+    assert clamp_snap_multiple(16) == 16
+    assert clamp_snap_multiple("64") == 64    # numeric strings accepted (widget can hand back a string)
+    assert clamp_snap_multiple(8.9) == 8      # truncated to int
+    assert clamp_snap_multiple(3000) == 1024  # clamped to the widget max
+
+
+def test_default_profile_empty_snap_multiple_heals_to_8():
+    # "" (the exact reported failure value) must not break the resolver: default snaps at mult 8.
+    # 1005/8 = 125.625 -> 126 -> 1008 (no .5 boundary, so Python round == JS Math.round).
+    assert resolve_dims("default", "raw", SQ, "landscape", "", 1.0, 1005, 1005) == (1008, 1008)
+
+
+def test_ideogram_ignores_empty_snap_multiple():
+    # The core invariant: Ideogram always snaps to 16 regardless of a garbage snap_multiple.
+    assert resolve_dims("Ideogram 4", "raw", SQ, "landscape", "", 1.0, 1050, 1050) == (1056, 1056)
+
+
+def test_ideogram_output_invariant_across_bad_snap_multiple():
+    # Property: for ANY snap_multiple, Ideogram yields identical dims, all multiples of 16 in [256,2048].
+    ref = resolve_dims("Ideogram 4", "megapixel", WS, "landscape", 8, 4.0, 0, 0)
+    for snap in ("", 0, -5, None, 1, 64, 3000):
+        w, h = resolve_dims("Ideogram 4", "megapixel", WS, "landscape", snap, 4.0, 0, 0)
+        assert (w, h) == ref
+        assert w % 16 == 0 and h % 16 == 0
+        assert 256 <= w <= 2048 and 256 <= h <= 2048

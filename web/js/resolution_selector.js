@@ -32,9 +32,14 @@ const aspectLabel = (r, n) => `${r} (${n})`;
 const parseAR = (s) => { const m = /^\s*(\d+)\s*:\s*(\d+)/.exec(String(s || "")); return m && +m[2] ? (+m[1]) / (+m[2]) : 1; };
 const effAR = (aspect, orient) => { const ar = parseAR(aspect); return (orient === "portrait" && ar) ? 1 / ar : ar; };
 const profClamps = (name) => (PROFILES[name] || PROFILES[DEFAULT_PROFILE]).max < BIG;
+// Coerce the snap_multiple widget value to a usable multiple in [1,1024]; anything non-numeric or
+// < 1 (an emptied number widget serializes "", 0, null, a negative) heals to the default 8. ComfyUI
+// coerces the widget to INT at queue time and int("") rejects the whole node — even for a profile
+// that ignores snap_multiple. Mirrors clamp_snap_multiple in nodes/resolution_core.py exactly.
+const clampSnap = (v) => { const n = Math.trunc(Number(v)); return (Number.isFinite(n) && n >= 1) ? Math.min(1024, n) : 8; };
 function effRules(name, snapMult) {
   const p = PROFILES[name] || PROFILES[DEFAULT_PROFILE];
-  const mult = p.mult ? p.mult : Math.max(1, parseInt(snapMult, 10) || 1);
+  const mult = p.mult ? p.mult : clampSnap(snapMult);
   return { mult, min: p.min, max: p.max };
 }
 const snap = (v, p) => Math.min(p.max, Math.max(p.min, Math.round((Number(v) || 0) / p.mult) * p.mult));
@@ -62,7 +67,7 @@ app.registerExtension({
       const wWidget = findW("width");
       const hWidget = findW("height");
 
-      const resMode = () => (modeWidget ? modeWidget.value : "raw");
+      const resMode = () => (modeWidget ? modeWidget.value : "megapixel");
       const profName = () => profileWidget?.value || DEFAULT_PROFILE;
       const orient = () => (orientWidget?.value === "portrait" ? "portrait" : "landscape");
       const currentDims = () => ({ w: parseInt(wWidget?.value, 10) || 0, h: parseInt(hWidget?.value, 10) || 0 });
@@ -133,7 +138,8 @@ app.registerExtension({
       }
 
       // Show/hide the mode-relevant widgets (snap_multiple only for the default profile; orientation
-      // is always hidden — driven by the flip button), then relayout the node.
+      // is always hidden — driven by the flip button; the flip button itself hides in raw mode, where
+      // there is no aspect to flip), then relayout the node.
       function applyVisibility() {
         const mode = resMode();
         setWidgetVisible(arWidget, mode !== "raw");
@@ -142,6 +148,7 @@ app.registerExtension({
         setWidgetVisible(hWidget, mode !== "megapixel");
         setWidgetVisible(snapWidget, profName() === DEFAULT_PROFILE);
         setWidgetVisible(orientWidget, false);
+        setWidgetVisible(flipBtn, mode !== "raw");
         if (node.computeSize) node.setSize([node.size[0], node.computeSize()[1]]);
         node.setDirtyCanvas?.(true, true);
       }
@@ -180,8 +187,9 @@ app.registerExtension({
       }
 
       const flipLabel = () => `⟷ Orientation: ${orient() === "portrait" ? "Portrait" : "Landscape"}`;
-      // Flip toggles orientation AND swaps the current width/height, then recomputes. In raw mode
-      // (no aspect) the swap alone rotates the size; in auto/megapixel the inverted ratio drives it.
+      // Flip toggles orientation AND swaps the current width/height, then recomputes: the inverted
+      // ratio drives the result, and in auto the swapped width seeds the rotated target. (The button
+      // is hidden in raw mode, so the no-aspect case never reaches here.)
       function doFlip() {
         if (orientWidget) orientWidget.value = orient() === "portrait" ? "landscape" : "portrait";
         if (wWidget && hWidget) { const t = wWidget.value; wWidget.value = hWidget.value; hWidget.value = t; }
@@ -223,9 +231,18 @@ app.registerExtension({
       const flipBtn = node.addWidget("button", flipLabel(), null, doFlip, { serialize: false });
       node.addDOMWidget("output_resolution", "info", readoutEl, { serialize: false });
 
+      // Guarantee snap_multiple always LEAVES the front-end as a valid int in [1,1024]. A ComfyUI
+      // number widget can serialize an empty string; int("") then fails the backend's INT validation
+      // and rejects the whole node — even under a profile (Ideogram 4) that ignores snap_multiple.
+      // serializeValue is graphToPrompt's single serialization point, so coercing here sanitizes
+      // every queue path and the saved workflow; sanitizeSnap repairs the DISPLAYED value on
+      // load/edit. (Same guard pattern as web/js/prompt_batch.js.)
+      const sanitizeSnap = () => { if (snapWidget) snapWidget.value = clampSnap(snapWidget.value); };
+      if (snapWidget) snapWidget.serializeValue = () => clampSnap(snapWidget.value);
+
       // ── wire widget callbacks (auto-push live so a connected canvas tracks edits) ──
-      if (profileWidget) chainCallback(profileWidget, "callback", () => { applyVisibility(); refresh("w", true); });
-      if (snapWidget) chainCallback(snapWidget, "callback", () => refresh("w", true));
+      if (profileWidget) chainCallback(profileWidget, "callback", () => { sanitizeSnap(); applyVisibility(); refresh("w", true); });
+      if (snapWidget) chainCallback(snapWidget, "callback", () => { sanitizeSnap(); refresh("w", true); });
       if (modeWidget) chainCallback(modeWidget, "callback", () => { applyVisibility(); refresh("w", true); });
       if (arWidget) chainCallback(arWidget, "callback", () => { if (resMode() !== "raw") refresh("w", true); });
       if (mpWidget) chainCallback(mpWidget, "callback", () => { if (resMode() === "megapixel") refresh(undefined, true); });
@@ -236,7 +253,7 @@ app.registerExtension({
       chainCallback(node, "onConnectionsChange", function () { requestAnimationFrame(() => pushToTargets()); });
 
       // Apply the current state (remap on load + visibility + recompute + readout). Reused by onConfigure.
-      node._resApply = () => { remapAspectOnLoad(); applyVisibility(); recalcDims("w"); updateReadout(); };
+      node._resApply = () => { sanitizeSnap(); remapAspectOnLoad(); applyVisibility(); recalcDims("w"); updateReadout(); };
       requestAnimationFrame(node._resApply);
     });
 

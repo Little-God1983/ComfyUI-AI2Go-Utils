@@ -55,6 +55,13 @@ DEFAULT_PROFILE = "default"
   shows it.
 - `megapixels` input max raised **4.2 → 16.0** so `default` isn't artificially capped. Ideogram 4
   still clamps to its 2048 cap and warns when a big MP target exceeds it.
+- **`snap_multiple` can never break a profile.** ComfyUI coerces the declared INT at queue time, and
+  a ComfyUI number widget can serialize an empty string — `int('')` then rejects the *whole* node,
+  even under a profile (Ideogram 4) that ignores the field. So the value is coerced to a valid
+  multiple in `[1, 1024]` (anything non-numeric or `< 1` → the default `8`) via one shared clamp
+  mirrored across `clamp_snap_multiple` (Python, used by `_rules`) and `clampSnap` (JS, used by the
+  readout math and the widget's `serializeValue` override — the single serialization chokepoint,
+  following the `prompt_batch.js` precedent). Ideogram's rules stay authoritative regardless.
 
 ### Widget visibility
 
@@ -122,8 +129,9 @@ Python's `execute` applies this, so the INT outputs are correct headless. The JS
 
 Behaviour per mode:
 - `auto` / `megapixel`: orientation changes the effective ratio (16:9 ⇄ 9:16); recompute follows.
-- `raw`: orientation has no effect on the aspect (there is none), but the button still swaps W/H
-  — a convenient "rotate my size". The button stays visible in all modes.
+  The flip button is visible here.
+- `raw`: there is no aspect to flip, so the flip button is **hidden**. (A new node defaults to
+  `megapixel` mode, so the button shows by default.)
 - Square (1:1): flip toggles orientation harmlessly; swapping equal-ish sides is a visual no-op.
 
 **Readout** gains the effective ratio + orientation to remove ambiguity (the combo always shows a
