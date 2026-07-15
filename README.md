@@ -187,6 +187,24 @@ error at run time.
 If the index ever overshoots the list (more runs than prompts), it clamps to the last prompt instead of
 erroring.
 
+### AI2Go Resolution Selector
+
+Pick a model-valid **width/height** by aspect ratio and mode, and (optionally) push it straight into
+a connected **Ideogram 4 Prompt Builder**.
+
+- **Profiles** — `default` does no clamping (it just snaps each side to the **`snap_multiple`** field,
+  default **8**, which is what most diffusion samplers require). Model profiles like **Ideogram 4**
+  enforce their own rules (multiples of 16, 256–2048 px) and show a *"clamped to keep aspect"* warning
+  when a request exceeds the cap. `default` is the default so the node is safe to drop into any
+  workflow.
+- **Modes** — `raw` (type width/height), `auto` (pick a ratio; edit one side, the other follows),
+  `megapixel` (target megapixels + ratio; both computed).
+- **Aspect ratios** — named presets from **1:1 (Square)** through **21:9 (Cinemascope)**. The list is
+  square + landscape only; the **`⟷` flip button** transposes to portrait (16:9 → 9:16) and swaps
+  width/height, so there's no duplicated 1:1.
+- The readout shows the resulting **W × H**, megapixels, and the effective ratio + orientation. Wire
+  `width`/`height` into a Prompt Builder; edits push into its canvas live and also apply on execution.
+
 ### AI2Go Save Metadata (Civitai)
 
 Two output nodes that save PNG(s) with an **A1111-style `parameters` text chunk** — the flat,
