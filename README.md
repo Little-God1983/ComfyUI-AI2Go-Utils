@@ -140,7 +140,8 @@ SaveImage filename so each file records *which prompt* made it).
   roomier boxes.
 - **📥 Read from JSON** — wire a text/primitive node holding a JSON prompt list into the optional
   `json_in` socket, then click to **append** it to the rows.
-- **🗑 Clear All** wipes the list.
+- **🗑 Clear All** (directly under Read from JSON) wipes the list — click once to arm
+  ("⚠ Sure? Click again"), click again within 4 s to confirm; it disarms itself otherwise.
 - The rows are the source of truth; internally they serialize to the JSON array
   `[{"positive": "...", "negative": "..."}, ...]` (a bare string is treated as positive-only), stored
   in a hidden field that both saves with the workflow and drives execution.

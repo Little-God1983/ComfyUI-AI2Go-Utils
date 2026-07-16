@@ -7,7 +7,9 @@
  * positive and a negative text box, drag-to-reorder (⠿) and per-row remove (🗑). Buttons:
  *   • 📥 Read from JSON — parse the node wired into the optional `json_in` socket and APPEND its
  *     prompts to the rows (pulled to the top, next to the input).
- *   • ➕ Add Prompt / 🗑 Clear All — grow or wipe the list; the node auto-grows AND auto-shrinks to fit.
+ *   • 🗑 Clear All — wipe the list; sits directly under Read from JSON (the two list-level ops
+ *     belong together). Two-step confirm (arm, then click again) — never a blocking confirm().
+ *   • ➕ Add Prompt — grow the list; the node auto-grows AND auto-shrinks to fit.
  *   • 🔍 Check for prompts — validate + count, reset index to 0, report how many runs to queue.
  * The "delete_empty_prompts" toggle (default on) drops rows with an empty positive on Check and just
  * before a batch is queued, so blank rows never break a run or skew the count.
@@ -343,8 +345,30 @@ app.registerExtension({
       });
       addBtn.serialize = false;
 
-      const clearBtn = node.addWidget("button", "🗑 Clear All", null, () => {
-        if (node._pbRows.length && !confirm("Remove all prompts from this node?")) return;
+      // No window-blocking confirm() here: a native dialog fired from inside the canvas's
+      // pointer state machine swallows the matching pointerup, which leaves pan/drag state stuck
+      // (the "canvas flies away" corruption) and re-fires the prompt when the cursor is parked
+      // over the button. Two-step confirm instead: first press arms, second press clears.
+      const CLEAR_LABEL = "🗑 Clear All";
+      let clearArmTimer = null;
+      const disarmClear = () => {
+        if (clearArmTimer != null) { clearTimeout(clearArmTimer); clearArmTimer = null; }
+        clearBtn.label = CLEAR_LABEL;
+        node.setDirtyCanvas?.(true, true);
+      };
+      const clearBtn = node.addWidget("button", CLEAR_LABEL, null, (v, canvas, n, pos, event) => {
+        // Pan/drag sequences with a second mouse button can replay a widget click at a stale
+        // cursor position — only a plain left-button press may operate this button.
+        if (event && typeof event.button === "number" && event.button !== 0) return;
+        if (!node._pbRows.length) { setStatus("Nothing to clear.", "#8a8a8a"); return; }
+        if (clearArmTimer == null) {
+          clearBtn.label = "⚠ Sure? Click again";
+          clearArmTimer = setTimeout(disarmClear, 4000);
+          setStatus(`Removes all ${node._pbRows.length} prompt${node._pbRows.length === 1 ? "" : "s"} — click again within 4s to confirm.`, "#e0a03c");
+          node.setDirtyCanvas?.(true, true);
+          return;
+        }
+        disarmClear();
         node._pbRows = [];
         render(); syncJson(); syncSize();
         setStatus('Cleared. Press "Add Prompt" or "Read from JSON" to start again.', "#8a8a8a");
@@ -370,9 +394,11 @@ app.registerExtension({
       node.addDOMWidget("prompt_batch_status", "info", statusEl, { serialize: false });
       setStatus('Add prompts, or import JSON — then press "Check for prompts".', "#8a8a8a");
 
-      // Hoist "Read from JSON" to just above the index widget, and drop the rows editor right below
-      // reset (it was appended after the buttons). Final order: [json(hidden), read, index, reset,
-      // rows, add, clear, check, status].
+      // Hoist "Read from JSON" (with "Clear All" right under it — the two list-level operations
+      // belong together) to just above the index widget, and drop the rows editor right below
+      // reset (it was appended after the buttons). Final order: [json(hidden), read, clear, index,
+      // reset, rows, add, check, status]. Reordering the buttons is safe because restore skips
+      // serialize=false widgets and the scalar widgets are mirrored by name (see onSerialize below).
       const move = (w, beforeName) => {
         const arr = node.widgets, cur = arr.indexOf(w);
         if (cur > -1) arr.splice(cur, 1);
@@ -380,14 +406,42 @@ app.registerExtension({
         arr.splice(at > -1 ? at : arr.length, 0, w);
       };
       move(readBtn, "index");
+      move(clearBtn, "index");
       move(rowsWidget, "➕ Add Prompt");
 
       node._pbRebuild();
     });
 
-    // After a saved workflow loads, prompts_json is restored — rebuild the rows from it.
-    chainCallback(nodeType.prototype, "onConfigure", function () {
+    // The frontend saves widgets_values at *absolute* widget indices (serialize=false buttons
+    // leave null holes) but restores them *compacted* (skipping those buttons) — so every scalar
+    // that sits after a button shifts by one slot on load. That is why a restored `index` could
+    // arrive null. Mirror the small scalars by name into node properties on save and restore them
+    // from there, immune to widget order. prompts_json stays positional: it is widget #0 (aligned
+    // under both schemes) and far too large to duplicate into properties.
+    const MIRRORED = ["index", "reset_index_at_batch_start", "delete_empty_prompts"];
+    chainCallback(nodeType.prototype, "onSerialize", function (o) {
+      const mirror = {};
+      for (const name of MIRRORED) {
+        const w = findWidget(this, name);
+        if (w) mirror[name] = w.value;
+      }
+      o.properties = o.properties || {};
+      o.properties.ai2go_pb = mirror;
+    });
+
+    // After a saved workflow loads: prefer the by-name mirror over whatever the positional restore
+    // produced (old workflows without the mirror keep the legacy behavior, which the existing
+    // guards — serializeValue coercion, "!== false" reset check — already handle). Then rebuild
+    // the rows from the restored prompts_json.
+    chainCallback(nodeType.prototype, "onConfigure", function (info) {
       const node = this;
+      const mirror = info?.properties?.ai2go_pb;
+      if (mirror && typeof mirror === "object") {
+        for (const name of MIRRORED) {
+          const w = findWidget(node, name);
+          if (w && mirror[name] !== undefined) w.value = mirror[name];
+        }
+      }
       requestAnimationFrame(() => node._pbRebuild?.());
     });
   },
