@@ -1,3 +1,23 @@
+[![The repo has moved](assets/stop-here.jpg)](https://github.com/Into-The-Latent/ComfyUI-IntoTheLatent-Utils)
+
+> ## 🛑 This repo has moved
+>
+> Development continues at **[ComfyUI-IntoTheLatent-Utils](https://github.com/Into-The-Latent/ComfyUI-IntoTheLatent-Utils)**,
+> under the new [Into The Latent](https://intothelatent.com) brand.
+>
+> **⛔ This repo will not be maintained anymore.** It is frozen at v1.6.1 — no further updates, no bug
+> fixes, no new nodes, and no support. It stays online only so existing installs and old workflows
+> keep working. Everything new happens in the repo above.
+>
+> ```bash
+> cd ComfyUI/custom_nodes
+> git clone https://github.com/Into-The-Latent/ComfyUI-IntoTheLatent-Utils
+> ```
+>
+> **Node IDs changed** (`AI2Go*` → `ITL*`), so workflows saved with this pack won't pick up the new
+> nodes automatically. The two packs coexist without conflict — keep this one installed for old
+> workflows while using the new one going forward.
+
 ![ComfyUI-AI2Go-Utils](assets/AI2Go-Banner.jpg)
 
 # ComfyUI-AI2Go-Utils
