@@ -9,6 +9,10 @@
 > fixes, no new nodes, and no support. It stays online only so existing installs and old workflows
 > keep working. Everything new happens in the repo above.
 >
+> **Why the move?** I didn't originally intend to rebrand the node pack at all. But after YouTube
+> closed the AIKnowledge2Go channel, I decided a clean cut was for the best — new channel, new name,
+> new repo — rather than carrying the old branding forward in half-renamed pieces.
+>
 > ```bash
 > cd ComfyUI/custom_nodes
 > git clone https://github.com/Into-The-Latent/ComfyUI-IntoTheLatent-Utils
